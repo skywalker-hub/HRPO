@@ -1,3 +1,6 @@
+import os
+os.environ['UNSLOTH_DISABLE_AUTO_UPDATES'] = '1'
+
 import unsloth
 from unsloth import is_bfloat16_supported
 from unsloth import FastLanguageModel, PatchFastRL

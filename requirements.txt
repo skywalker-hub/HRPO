@@ -40,13 +40,13 @@ fastapi==0.115.12
 fastapi-cli==0.0.7
 fastrlock==0.8.3
 filelock==3.18.0
-flashinfer-python==0.2.3+cu121torch2.5
+#flashinfer-python==0.2.3+cu121torch2.5
 frozenlist==1.5.0
 fsspec==2024.12.0
 gguf==0.10.0
 gitdb==4.0.12
 GitPython==3.1.44
-gmpy2 @ file:///croot/gmpy2_1738085463648/work
+gmpy2 
 h11==0.14.0
 hf_transfer==0.1.9
 httpcore==1.0.7
@@ -60,7 +60,7 @@ interegular==0.3.3
 ipython==9.0.2
 ipython_pygments_lexers==1.1.1
 jedi==0.19.2
-Jinja2 @ file:///croot/jinja2_1741710844255/work
+Jinja2 
 jiter==0.9.0
 joblib==1.4.2
 jsonschema==4.23.0
@@ -71,19 +71,19 @@ llguidance==0.7.11
 llvmlite==0.43.0
 lm-format-enforcer==0.10.11
 markdown-it-py==3.0.0
-MarkupSafe @ file:///croot/markupsafe_1738584038848/work
+MarkupSafe 
 matplotlib-inline==0.1.7
 mdurl==0.1.2
 mistral_common==1.5.4
 modelscope==1.24.1
-mpmath @ file:///croot/mpmath_1690848262763/work
+mpmath 
 msgpack==1.1.0
 msgspec==0.19.0
 multidict==6.2.0
 multiprocess==0.70.16
 nanobind==2.6.1
 nest-asyncio==1.6.0
-networkx @ file:///croot/networkx_1737039604450/work
+networkx 
 ninja==1.11.1.4
 numba==0.60.0
 numpy==1.26.4
@@ -136,7 +136,7 @@ python-dotenv==1.0.1
 python-json-logger==3.3.0
 python-multipart==0.0.20
 pytz==2025.1
-PyYAML @ file:///croot/pyyaml_1728657952215/work
+PyYAML 
 pyzmq==26.3.0
 RapidFuzz==3.12.2
 ray==2.40.0
@@ -171,14 +171,14 @@ tiktoken==0.9.0
 tokenizers==0.21.1
 torch==2.5.1
 torchao==0.9.0
-torchaudio==2.5.1+cu121
-torchvision==0.20.1+cu121
+#torchaudio==2.5.1+cu121
+#torchvision==0.20.1+cu121
 tqdm==4.67.1
 traitlets==5.14.3
 triton==3.1.0
 typeguard==4.4.2
 typer==0.15.2
-typing_extensions @ file:///croot/typing_extensions_1734714854207/work
+typing_extensions 
 tyro==0.9.17
 tzdata==2025.2
 urllib3==2.3.0
