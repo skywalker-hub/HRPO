@@ -153,9 +153,10 @@ sentence-transformers==4.0.1
 sentencepiece==0.2.0
 sentry-sdk==2.24.1
 setproctitle==1.3.5
-sgl-kernel==0.0.5.post4
+#sgl-kernel==0.0.5.post4
 sglang==0.4.4.post3
 sglang-router==0.1.4
+sgl-kernel
 shellingham==1.5.4
 shtab==1.7.1
 six==1.17.0
