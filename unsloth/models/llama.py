@@ -661,11 +661,47 @@ def LlamaModel_fast_forward(
         inputs_embeds = self.embed_tokens(input_ids)
 
     thinking_mask = kwargs.get('thinking_mask')
+    recompute_thinking_projection = kwargs.get('recompute_thinking_projection', False)
+    thinking_hidden_states_cache = kwargs.get('thinking_hidden_states_cache', None)
+    
     if thinking_mask is not None:
         new_inputs_embeds = inputs_embeds.clone()
-        new_inputs_embeds[thinking_mask] = self.thinking_residual(
-            inputs_embeds[thinking_mask], thinking_embeds[thinking_mask],
-        )[0].to(inputs_embeds.dtype)
+        
+        # Check if we need to dynamically recompute thinking states during training
+        if recompute_thinking_projection and self.training and thinking_hidden_states_cache is not None:
+            # DYNAMIC TRAINING MODE:
+            # Recompute thinking states from cached hidden states through thinking_projection
+            # This creates a computation graph: hidden_states -> thinking_projection -> thinking_embeds
+            # allowing gradients to flow back to thinking_projection during backpropagation
+            
+            # thinking_hidden_states_cache shape: (batch_size, seq_len, hidden_dim)
+            # We only need the positions indicated by thinking_mask
+            batch_indices = thinking_mask.nonzero(as_tuple=True)
+            
+            # Extract hidden states for thinking positions
+            hidden_for_thinking = thinking_hidden_states_cache[batch_indices]
+            
+            # Apply thinking_projection with gradients enabled
+            thinking_embeds_dynamic = self.thinking_projection(hidden_for_thinking)
+            
+            # Normalize (same as in generation)
+            thinking_embeds_dynamic = thinking_embeds_dynamic / (
+                torch.norm(thinking_embeds_dynamic, dim=-1, keepdim=True) + 1e-8
+            )
+            
+            # Apply thinking_residual fusion
+            new_inputs_embeds[thinking_mask] = self.thinking_residual(
+                inputs_embeds[thinking_mask], 
+                thinking_embeds_dynamic,
+            )[0].to(inputs_embeds.dtype)
+        else:
+            # INFERENCE MODE or when recompute flag is off:
+            # Use pre-computed frozen thinking_embeds (no gradient flow to thinking_projection)
+            new_inputs_embeds[thinking_mask] = self.thinking_residual(
+                inputs_embeds[thinking_mask], 
+                thinking_embeds[thinking_mask],
+            )[0].to(inputs_embeds.dtype)
+        
         inputs_embeds = new_inputs_embeds
 
     inputs_embeds = inputs_embeds.to(_get_dtype(self.config.torch_dtype))
