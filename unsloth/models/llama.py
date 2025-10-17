@@ -2341,10 +2341,12 @@ class FastLlamaModel:
                     train_embed_tokens = True
                 elif "thinking_residual" in module:
                     train_thinking_residual = True
+                elif "thinking_projection" in module:
+                    train_thinking_residual = True  # Use same flag as thinking_residual components
                 else:
                     raise TypeError(
-                        f"Unsloth: Module = {module} is not allowed. Only 'lm_head', 'embed_tokens' "
-                        "and 'thinking_residual' components are allowed."
+                        f"Unsloth: Module = {module} is not allowed. Only 'lm_head', 'embed_tokens', "
+                        "'thinking_residual' and 'thinking_projection' components are allowed."
                     )
             pass
         pass
