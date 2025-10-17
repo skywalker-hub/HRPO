@@ -3366,10 +3366,24 @@ class GenerationMixin:
 
             strs = processing_class.batch_decode(input_ids[:, input_len:])
             is_thinking = [self.answer_start not in s for s in strs]
-            last_thinking_states = torch.einsum(
-                'bv,vd->bd', probs, self.get_input_embeddings().weight
-            )
-            last_thinking_states /= torch.sqrt((probs ** 2).sum(-1, keepdim=True)).to(last_thinking_states.dtype)
+            
+            # Generate last_thinking_states using learnable projection from hidden states
+            # This replaces the fixed vocabulary embedding weighted sum with a trainable mapping
+            if hasattr(outputs, 'last_hidden_state') and outputs.last_hidden_state is not None:
+                # Get the last token's hidden state (batch_size, hidden_dim)
+                last_token_hidden = outputs.last_hidden_state[:, -1, :]
+                # Apply learnable projection to generate thinking states
+                last_thinking_states = self.model.thinking_projection(last_token_hidden)
+                # Normalize to maintain consistent magnitude
+                last_thinking_states = last_thinking_states / (
+                    torch.norm(last_thinking_states, dim=-1, keepdim=True) + 1e-8
+                )
+            else:
+                # Fallback: use original method if hidden states not available
+                last_thinking_states = torch.einsum(
+                    'bv,vd->bd', probs, self.get_input_embeddings().weight
+                )
+                last_thinking_states /= torch.sqrt((probs ** 2).sum(-1, keepdim=True)).to(last_thinking_states.dtype)
 
             if return_thinking_embeds and outputs.hidden_states is not None:
                 thinking_embeds.append(outputs.hidden_states[0].unsqueeze(1))

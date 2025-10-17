@@ -2476,6 +2476,11 @@ class FastLlamaModel:
                     model.model.model.thinking_residual_Lambda.modules_to_save.default\
                         .to(device = "cuda", dtype = torch.float32, non_blocking = True)
                     model.model.model.thinking_residual_Lambda.modules_to_save.default.requires_grad_(True)
+                if "thinking_projection" in module:
+                    assert(hasattr(model.model.model.thinking_projection, "modules_to_save"))
+                    model.model.model.thinking_projection.modules_to_save.default\
+                        .to(device = "cuda", dtype = new_dtype, non_blocking = True)
+                    model.model.model.thinking_projection.modules_to_save.default.requires_grad_(True)
 
         # Patch tokenizer to pad to the right
         internal_model = model

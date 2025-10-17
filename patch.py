@@ -2,7 +2,7 @@ import types
 from transformers.trainer import *
 
 
-def patch_trainer_optimizer(trainer, lr_thinking_residual_gate=1e-4, thinking_residual_Lambda=1e-3):
+def patch_trainer_optimizer(trainer, lr_thinking_residual_gate=1e-4, thinking_residual_Lambda=1e-3, lr_thinking_projection=1e-4):
     def create_optimizer(self):
         """
         Setup the optimizer.
@@ -17,14 +17,14 @@ def patch_trainer_optimizer(trainer, lr_thinking_residual_gate=1e-4, thinking_re
             optimizer_grouped_parameters = [
                 {
                     "params": [
-                        p for n, p in opt_model.named_parameters() if ("thinking_residual" not in n and n in decay_parameters and p.requires_grad)
+                        p for n, p in opt_model.named_parameters() if ("thinking_residual" not in n and "thinking_projection" not in n and n in decay_parameters and p.requires_grad)
                     ],
                     "lr": self.args.learning_rate,
                     "weight_decay": self.args.weight_decay,
                 },
                 {
                     "params": [
-                        p for n, p in opt_model.named_parameters() if ("thinking_residual" not in n and n not in decay_parameters and p.requires_grad)
+                        p for n, p in opt_model.named_parameters() if ("thinking_residual" not in n and "thinking_projection" not in n and n not in decay_parameters and p.requires_grad)
                     ],
                     "lr": self.args.learning_rate,
                     "weight_decay": 0.0,
@@ -41,6 +41,13 @@ def patch_trainer_optimizer(trainer, lr_thinking_residual_gate=1e-4, thinking_re
                         p for n, p in opt_model.named_parameters() if ("thinking_residual_Lambda" in n and p.requires_grad)
                     ],
                     "lr": thinking_residual_Lambda,
+                    "weight_decay": self.args.weight_decay,
+                },
+                {
+                    "params": [
+                        p for n, p in opt_model.named_parameters() if ("thinking_projection" in n and p.requires_grad)
+                    ],
+                    "lr": lr_thinking_projection,
                     "weight_decay": self.args.weight_decay,
                 },
             ]

@@ -539,9 +539,20 @@ class LlamaModel(LlamaPreTrainedModel):
         self.thinking_residual_gate_r = nn.Linear(config.hidden_size, config.hidden_size)
         self.thinking_residual_gate_i = nn.Linear(config.hidden_size, config.hidden_size)
         self.thinking_residual_Lambda = ThinkingResidualLambda(config)
+        
+        # Thinking projection layer for learning context-aware continuous thinking representations
+        self.thinking_projection = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
 
         # Initialize weights and apply final processing
         self.post_init()
+        
+        # Initialize thinking_projection with small variance to ensure initial behavior matches original model
+        self._init_thinking_projection()
+    
+    def _init_thinking_projection(self):
+        """Initialize thinking_projection with near-zero small variance for smooth transition."""
+        with torch.no_grad():
+            nn.init.normal_(self.thinking_projection.weight, mean=0.0, std=0.001)
 
     def get_input_embeddings(self):
         return self.embed_tokens
