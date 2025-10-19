@@ -127,10 +127,9 @@ if __name__ == "__main__":
 
     parser.add_argument("--group_size", type=int, default=4)
     parser.add_argument("--temperature", type=float, default=0.5)
-
-
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=2)
-    parser.add_argument("--per_device_train_batch_size", type=int, default=32)
+    
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
+    parser.add_argument("--per_device_train_batch_size", type=int, default=24)
 
     
     parser.add_argument("--max_prompt_length", type=int, default=1024)
