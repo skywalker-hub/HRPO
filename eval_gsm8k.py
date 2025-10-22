@@ -170,7 +170,8 @@ if __name__ == "__main__":
         if model_name in checkpoint_path:
             # 使用本地路径
             base_model = local_model_paths.get(model_name, model)
-    temperature = float(checkpoint_path.split('-temp')[-1].split('/')[0])
+    #temperature = float(checkpoint_path.split('-temp')[-1].split('/')[0])
+    temperature =0.9
     print(checkpoint_path, base_model, temperature)
 
     if 'eval_results.json' not in os.listdir(checkpoint_path):

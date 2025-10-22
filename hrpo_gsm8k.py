@@ -126,7 +126,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_grad_norm", type=float, default=0.1)
 
     parser.add_argument("--group_size", type=int, default=4)
-    parser.add_argument("--temperature", type=float, default=0.9)
+    parser.add_argument("--temperature", type=float, default=0.5)
     
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--per_device_train_batch_size", type=int, default=32)
