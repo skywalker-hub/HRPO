@@ -52,7 +52,6 @@ def main(args):
             "thinking_residual_gate_r",
             "thinking_residual_gate_i",
             "thinking_residual_Lambda",
-            "thinking_projection",
         ], 
         lora_alpha = args.lora_rank * 2,
         use_gradient_checkpointing = "unsloth",
@@ -103,7 +102,6 @@ def main(args):
         trainer,
         args.lr_residual_gate,
         args.lr_residual_Lambda,
-        args.lr_thinking_projection,
     )
     trainer.train()
 
@@ -118,7 +116,6 @@ if __name__ == "__main__":
     parser.add_argument("--residual_r_max", type=float, default=0.999)
     parser.add_argument("--lr_residual_gate", type=float, default=1e-4)
     parser.add_argument("--lr_residual_Lambda", type=float, default=1e-3)
-    parser.add_argument("--lr_thinking_projection", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=0.1)
     parser.add_argument("--warmup_ratio", type=float, default=0.1)
     parser.add_argument("--lr_scheduler_type", type=str, default="cosine")
@@ -127,14 +124,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--group_size", type=int, default=4)
     parser.add_argument("--temperature", type=float, default=0.5)
-    
-    #parser.add_argument("--gradient_accumulation_steps", type=int, default=8)
-    #parser.add_argument("--per_device_train_batch_size", type=int, default=4)
-
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--per_device_train_batch_size", type=int, default=128)
-
-    
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=4)
+    parser.add_argument("--per_device_train_batch_size", type=int, default=8)
     parser.add_argument("--max_prompt_length", type=int, default=1024)
     parser.add_argument("--max_completion_length", type=int, default=1024)
 

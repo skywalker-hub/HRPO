@@ -405,38 +405,9 @@ def grpo_accumulated_loss(
             old_hidden_states = trainer.model(input_ids = input_ids, logits_to_keep = logits_to_keep + 1).logits
         pass
 
-        # Dynamic thinking projection: recompute thinking states with gradients during training
-        # This allows thinking_projection to be trained via backpropagation
-        if thinking_embeds is not None and thinking_mask is not None:
-            # Clone to avoid modifying original tensors
-            thinking_embeds = thinking_embeds.clone()
-            thinking_mask = thinking_mask.clone()
-            
-            # STEP 1: First forward pass to get hidden states at each thinking position
-            # We need these hidden states to recompute thinking_projection with gradients
-            with torch.no_grad():
-                # Get hidden states for all positions (without thinking fusion)
-                temp_outputs = trainer.model(
-                    input_ids = input_ids,
-                    output_hidden_states = True,
-                    logits_to_keep = logits_to_keep + 1
-                )
-                # Extract last hidden state before lm_head
-                thinking_hidden_states_cache = temp_outputs.hidden_states[-1] if hasattr(temp_outputs, 'hidden_states') else None
-                del temp_outputs
-            
-            # STEP 2: Forward pass with dynamic thinking_projection recomputation
-            # Now hidden states will flow through: hidden -> thinking_projection -> thinking_residual -> model
-            new_hidden_states = trainer.model(
-                input_ids = input_ids, 
-                inputs_embeds = thinking_embeds,  # Still pass original for fallback
-                thinking_mask = thinking_mask, 
-                logits_to_keep = logits_to_keep + 1,
-                recompute_thinking_projection = True,  # Enable dynamic recomputation
-                thinking_hidden_states_cache = thinking_hidden_states_cache  # Pass hidden states for projection
-            ).logits
-        else:
-            new_hidden_states = trainer.model(input_ids = input_ids, logits_to_keep = logits_to_keep + 1).logits
+        if thinking_embeds is not None: thinking_embeds = thinking_embeds.clone()
+        if thinking_mask is not None: thinking_mask = thinking_mask.clone()
+        new_hidden_states = trainer.model(input_ids = input_ids, inputs_embeds = thinking_embeds, thinking_mask = thinking_mask, logits_to_keep = logits_to_keep + 1).logits
         
         loss, completion_length, mean_kl = UnslothEfficientGRPO.apply(
             new_hidden_states, old_hidden_states, lm_head,
