@@ -3376,14 +3376,27 @@ class GenerationMixin:
                 # Fallback: use zeros if hidden states not available
                 last_hidden_states = None
 
-            if return_thinking_embeds and outputs.hidden_states is not None:
-                thinking_embeds.append(outputs.hidden_states[0].unsqueeze(1))
-                thinking_mask.append(
-                    torch.tensor(outputs.hidden_states[1], device=input_ids.device).unsqueeze(1)
-                )
-                embeds_ratio.append(
-                    outputs.hidden_states[2].unsqueeze(1)
-                )
+            if return_thinking_embeds:
+                if outputs.hidden_states is not None and len(outputs.hidden_states) >= 3:
+                    # outputs.hidden_states contains [continuous_bias, is_thinking, gate_magnitude]
+                    continuous_bias = outputs.hidden_states[0]
+                    is_thinking_flags = outputs.hidden_states[1]
+                    gate_magnitude = outputs.hidden_states[2]
+                    
+                    thinking_embeds.append(continuous_bias.unsqueeze(1))
+                    thinking_mask.append(
+                        torch.tensor(is_thinking_flags, device=input_ids.device).unsqueeze(1)
+                    )
+                    embeds_ratio.append(
+                        gate_magnitude.unsqueeze(1) if isinstance(gate_magnitude, torch.Tensor) else torch.ones(input_ids.size(0), 1, device=input_ids.device)
+                    )
+                else:
+                    # Fallback: no thinking information available
+                    batch_size = input_ids.size(0)
+                    hidden_dim = self.config.hidden_size
+                    thinking_embeds.append(torch.zeros(batch_size, 1, hidden_dim, device=input_ids.device))
+                    thinking_mask.append(torch.zeros(batch_size, 1, dtype=torch.bool, device=input_ids.device))
+                    embeds_ratio.append(torch.ones(batch_size, 1, device=input_ids.device))
 
             unfinished_sequences = unfinished_sequences & ~stopping_criteria(input_ids, scores)
             this_peer_finished = unfinished_sequences.max() == 0

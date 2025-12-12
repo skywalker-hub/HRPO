@@ -1076,10 +1076,19 @@ def LlamaModel_fast_forward_inference(
         variance = variance,
     )
 
+    # Always return valid hidden_states structure for Token-Dependent Gated Residual tracking
+    if is_thinking is not None:
+        # Ensure thinking_embeds is never None (use zeros if no thinking happened)
+        if thinking_embeds is None:
+            thinking_embeds = torch.zeros(bsz, hd, device=X.device, dtype=X.dtype)
+        hidden_states_output = [thinking_embeds, is_thinking, embeds_ratio]
+    else:
+        hidden_states_output = None
+    
     return BaseModelOutputWithPast(
         last_hidden_state = X,
         past_key_values = next_decoder_cache,
-        hidden_states = [] if is_thinking is None else [thinking_embeds, is_thinking, embeds_ratio],
+        hidden_states = hidden_states_output,
         attentions = [],
     )
 
