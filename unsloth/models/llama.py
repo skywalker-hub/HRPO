@@ -661,46 +661,44 @@ def LlamaModel_fast_forward(
         inputs_embeds = self.embed_tokens(input_ids)
 
     thinking_mask = kwargs.get('thinking_mask')
-    recompute_thinking_projection = kwargs.get('recompute_thinking_projection', False)
+    recompute_thinking = kwargs.get('recompute_thinking', False)
     thinking_hidden_states_cache = kwargs.get('thinking_hidden_states_cache', None)
+    thinking_input_ids_cache = kwargs.get('thinking_input_ids_cache', None)
     
-    if thinking_mask is not None:
+    if thinking_mask is not None and thinking_mask.any():
         new_inputs_embeds = inputs_embeds.clone()
         
-        # Check if we need to dynamically recompute thinking states during training
-        if recompute_thinking_projection and self.training and thinking_hidden_states_cache is not None:
+        # Token-Dependent Gated Residual mechanism for training
+        if recompute_thinking and self.training and thinking_hidden_states_cache is not None and thinking_input_ids_cache is not None:
             # DYNAMIC TRAINING MODE:
-            # Recompute thinking states from cached hidden states through thinking_projection
-            # This creates a computation graph: hidden_states -> thinking_projection -> thinking_embeds
-            # allowing gradients to flow back to thinking_projection during backpropagation
+            # Recompute continuous bias from cached hidden states and input_ids
+            # This creates a computation graph allowing gradients to flow back
             
-            # thinking_hidden_states_cache shape: (batch_size, seq_len, hidden_dim)
-            # We only need the positions indicated by thinking_mask
+            # Get positions where thinking is active
             batch_indices = thinking_mask.nonzero(as_tuple=True)
             
-            # Extract hidden states for thinking positions
-            hidden_for_thinking = thinking_hidden_states_cache[batch_indices]
+            # Extract hidden states and input_ids for thinking positions
+            hidden_for_thinking = thinking_hidden_states_cache[batch_indices]  # (num_thinking_positions, hidden_dim)
+            ids_for_thinking = thinking_input_ids_cache[batch_indices]  # (num_thinking_positions,)
             
-            # Apply thinking_projection with gradients enabled
-            thinking_embeds_dynamic = self.thinking_projection(hidden_for_thinking)
+            # Step A: Extract continuous information via info_head
+            v_t = self.info_head(hidden_for_thinking)  # (num_thinking_positions, hidden_dim)
             
-            # Normalize (same as in generation)
-            thinking_embeds_dynamic = thinking_embeds_dynamic / (
-                torch.norm(thinking_embeds_dynamic, dim=-1, keepdim=True) + 1e-8
-            )
+            # Step B: Token-specific gating with exponential activation
+            gate_vectors = self.token_gate_matrix(ids_for_thinking)  # (num_thinking_positions, hidden_dim)
+            g_k = torch.exp(gate_vectors)
             
-            # Apply thinking_residual fusion
-            new_inputs_embeds[thinking_mask] = self.thinking_residual(
-                inputs_embeds[thinking_mask], 
-                thinking_embeds_dynamic,
-            )[0].to(inputs_embeds.dtype)
+            # Step C: Element-wise multiplication to get continuous bias
+            continuous_bias = v_t * g_k  # (num_thinking_positions, hidden_dim)
+            
+            # Step D: Residual injection
+            # inputs_embeds = original_token_embeds + continuous_bias
+            new_inputs_embeds[thinking_mask] = (inputs_embeds[thinking_mask] + continuous_bias).to(inputs_embeds.dtype)
         else:
             # INFERENCE MODE or when recompute flag is off:
-            # Use pre-computed frozen thinking_embeds (no gradient flow to thinking_projection)
-            new_inputs_embeds[thinking_mask] = self.thinking_residual(
-                inputs_embeds[thinking_mask], 
-                thinking_embeds[thinking_mask],
-            )[0].to(inputs_embeds.dtype)
+            # Use pre-computed frozen thinking_embeds (continuous_bias)
+            if thinking_embeds is not None:
+                new_inputs_embeds[thinking_mask] = (inputs_embeds[thinking_mask] + thinking_embeds[thinking_mask]).to(inputs_embeds.dtype)
         
         inputs_embeds = new_inputs_embeds
 
@@ -970,19 +968,42 @@ def LlamaModel_fast_forward_inference(
     hd = self.config.hidden_size
     mlp_size = self.config.intermediate_size
 
+    # Get original token embeddings
     X = self.model.embed_tokens(input_ids)
     X = X.to(_get_dtype(self.config.torch_dtype))
 
+    # Token-Dependent Gated Residual mechanism
     is_thinking = kwargs.get('is_thinking')
-    last_thinking_states = kwargs.get('last_thinking_states')
-    if is_thinking is not None and last_thinking_states is not None:
-        thinking_embeds = last_thinking_states
-        X_hat, a_t = self.model.thinking_residual(
-            X, last_thinking_states.unsqueeze(1),
-        )
-        embeds_ratio = a_t.mean(-1).squeeze()
-        embeds_ratio[~torch.tensor(is_thinking)] = 1.
-        X[is_thinking] = X_hat[is_thinking].to(X.dtype)
+    last_hidden_states = kwargs.get('last_hidden_states')
+    thinking_embeds = None
+    embeds_ratio = torch.ones(bsz, device=X.device, dtype=torch.float32)
+    
+    if is_thinking is not None and last_hidden_states is not None:
+        # Create mask for thinking positions
+        is_thinking_tensor = torch.tensor(is_thinking, device=X.device)
+        
+        if is_thinking_tensor.any():
+            # Step A: Extract continuous information via info_head
+            # v_t = info_head(last_hidden_states)
+            v_t = self.model.info_head(last_hidden_states)  # (batch_size, hidden_dim)
+            
+            # Step B: Token-specific gating with exponential activation
+            # g_k = exp(token_gate_matrix(input_ids))
+            gate_vectors = self.model.token_gate_matrix(input_ids.squeeze(-1))  # (batch_size, hidden_dim)
+            g_k = torch.exp(gate_vectors)
+            
+            # Step C: Element-wise multiplication to get continuous bias
+            continuous_bias = v_t * g_k  # (batch_size, hidden_dim)
+            
+            # Step D: Residual injection (only for thinking positions)
+            # inputs_embeds = original_token_embeds + continuous_bias
+            X_with_bias = X.squeeze(1) + continuous_bias  # (batch_size, hidden_dim)
+            X[is_thinking_tensor] = X_with_bias[is_thinking_tensor].unsqueeze(1).to(X.dtype)
+            
+            # Store for logging (use gate magnitude as a proxy for embeds_ratio)
+            embeds_ratio = 1.0 / (g_k.mean(-1) + 1e-8)  # inverse of gate magnitude
+            embeds_ratio[~is_thinking_tensor] = 1.0
+            thinking_embeds = continuous_bias
 
 
     bsz, q_len, hd = X.shape
@@ -1061,7 +1082,6 @@ def LlamaModel_fast_forward_inference(
         hidden_states = [] if is_thinking is None else [thinking_embeds, is_thinking, embeds_ratio],
         attentions = [],
     )
-pass
 
 
 def CausalLM_fast_forward(fast_forward_inference):
@@ -2299,7 +2319,7 @@ class FastLlamaModel:
 
         train_lm_head = False
         train_embed_tokens = False
-        train_thinking_residual = False
+        train_thinking_components = False
         final_modules = []
         for module in target_modules:
             if module == "lm_head":
@@ -2320,10 +2340,10 @@ class FastLlamaModel:
                 if modules_to_save is None: modules_to_save = ["embed_tokens"]
                 else: modules_to_save.append("embed_tokens")
 
-            elif "thinking_residual" in module:
-                train_thinking_residual = True
+            elif module in ("info_head", "token_gate_matrix"):
+                train_thinking_components = True
                 if modules_to_save is None: modules_to_save = [module]
-                else: modules_to_save = list(set(modules_to_save).add(module))
+                else: modules_to_save.append(module)
 
             else:
                 try:
@@ -2375,14 +2395,12 @@ class FastLlamaModel:
                     train_lm_head = True
                 elif module == "embed_tokens":
                     train_embed_tokens = True
-                elif "thinking_residual" in module:
-                    train_thinking_residual = True
-                elif "thinking_projection" in module:
-                    train_thinking_residual = True  # Use same flag as thinking_residual components
+                elif module in ("info_head", "token_gate_matrix"):
+                    train_thinking_components = True
                 else:
                     raise TypeError(
                         f"Unsloth: Module = {module} is not allowed. Only 'lm_head', 'embed_tokens', "
-                        "'thinking_residual' and 'thinking_projection' components are allowed."
+                        "'info_head' and 'token_gate_matrix' components are allowed."
                     )
             pass
         pass
@@ -2492,33 +2510,24 @@ class FastLlamaModel:
             model.get_output_embeddings().modules_to_save.default.requires_grad_(True)
         pass
 
-        if train_thinking_residual:
-            print("Unsloth: Training thinking_residual in mixed precision to save VRAM")
+        if train_thinking_components:
+            print("Unsloth: Training Token-Dependent Gated Residual components in mixed precision to save VRAM")
             try:
                 new_dtype = model.get_input_embeddings().weight.dtype
             except:
                 new_dtype = model.get_input_embeddings().modules_to_save.default.weight.dtype
 
             for module in modules_to_save:
-                if "thinking_residual_gate_r" in module:
-                    assert(hasattr(model.model.model.thinking_residual_gate_r, "modules_to_save"))
-                    model.model.model.thinking_residual_gate_r.modules_to_save.default\
+                if module == "info_head":
+                    assert(hasattr(model.model.model.info_head, "modules_to_save"))
+                    model.model.model.info_head.modules_to_save.default\
                         .to(device = "cuda", dtype = new_dtype, non_blocking = True)
-                    model.model.model.thinking_residual_gate_r.modules_to_save.default.requires_grad_(True)
-                if "thinking_residual_gate_i" in module:
-                    assert(hasattr(model.model.model.thinking_residual_gate_i, "modules_to_save"))
-                    model.model.model.thinking_residual_gate_i.modules_to_save.default\
+                    model.model.model.info_head.modules_to_save.default.requires_grad_(True)
+                if module == "token_gate_matrix":
+                    assert(hasattr(model.model.model.token_gate_matrix, "modules_to_save"))
+                    model.model.model.token_gate_matrix.modules_to_save.default\
                         .to(device = "cuda", dtype = new_dtype, non_blocking = True)
-                    model.model.model.thinking_residual_gate_i.modules_to_save.default.requires_grad_(True)
-                if "thinking_residual_Lambda" in module:
-                    model.model.model.thinking_residual_Lambda.modules_to_save.default\
-                        .to(device = "cuda", dtype = torch.float32, non_blocking = True)
-                    model.model.model.thinking_residual_Lambda.modules_to_save.default.requires_grad_(True)
-                if "thinking_projection" in module:
-                    assert(hasattr(model.model.model.thinking_projection, "modules_to_save"))
-                    model.model.model.thinking_projection.modules_to_save.default\
-                        .to(device = "cuda", dtype = new_dtype, non_blocking = True)
-                    model.model.model.thinking_projection.modules_to_save.default.requires_grad_(True)
+                    model.model.model.token_gate_matrix.modules_to_save.default.requires_grad_(True)
 
         # Patch tokenizer to pad to the right
         internal_model = model

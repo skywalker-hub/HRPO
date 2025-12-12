@@ -405,15 +405,14 @@ def grpo_accumulated_loss(
             old_hidden_states = trainer.model(input_ids = input_ids, logits_to_keep = logits_to_keep + 1).logits
         pass
 
-        # Dynamic thinking projection: recompute thinking states with gradients during training
-        # This allows thinking_projection to be trained via backpropagation
-        if thinking_embeds is not None and thinking_mask is not None:
+        # Token-Dependent Gated Residual mechanism: recompute continuous bias with gradients during training
+        # This allows info_head and token_gate_matrix to be trained via backpropagation
+        if thinking_mask is not None and thinking_mask.any():
             # Clone to avoid modifying original tensors
-            thinking_embeds = thinking_embeds.clone()
             thinking_mask = thinking_mask.clone()
             
-            # STEP 1: First forward pass to get hidden states at each thinking position
-            # We need these hidden states to recompute thinking_projection with gradients
+            # STEP 1: First forward pass to get hidden states at each position
+            # We need these hidden states to compute continuous bias with gradients
             with torch.no_grad():
                 # Get hidden states for all positions (without thinking fusion)
                 temp_outputs = trainer.model(
@@ -425,15 +424,15 @@ def grpo_accumulated_loss(
                 thinking_hidden_states_cache = temp_outputs.hidden_states[-1] if hasattr(temp_outputs, 'hidden_states') else None
                 del temp_outputs
             
-            # STEP 2: Forward pass with dynamic thinking_projection recomputation
-            # Now hidden states will flow through: hidden -> thinking_projection -> thinking_residual -> model
+            # STEP 2: Forward pass with dynamic Token-Dependent Gated Residual recomputation
+            # Now hidden states will flow through: hidden -> info_head -> (g_k * v_t) -> residual
             new_hidden_states = trainer.model(
                 input_ids = input_ids, 
-                inputs_embeds = thinking_embeds,  # Still pass original for fallback
                 thinking_mask = thinking_mask, 
                 logits_to_keep = logits_to_keep + 1,
-                recompute_thinking_projection = True,  # Enable dynamic recomputation
-                thinking_hidden_states_cache = thinking_hidden_states_cache  # Pass hidden states for projection
+                recompute_thinking = True,  # Enable dynamic recomputation
+                thinking_hidden_states_cache = thinking_hidden_states_cache,  # Pass hidden states for info_head
+                thinking_input_ids_cache = input_ids,  # Pass input_ids for token_gate_matrix lookup
             ).logits
         else:
             new_hidden_states = trainer.model(input_ids = input_ids, logits_to_keep = logits_to_keep + 1).logits
@@ -512,25 +511,16 @@ def grpo_trainer_compute_loss(function_name, function):
             )
 
         # Log the metrics
-        # completion_length = self.accelerator.gather_for_metrics(completion_mask.sum(1)).float().mean().item()
-
-        # mean_kl = ((per_token_kl * completion_mask).sum(dim=1) / completion_mask.sum(dim=1)).mean()
-        # self._metrics["kl"].append(self.accelerator.gather_for_metrics(mean_kl).mean().item())
-
-        embeds_ratio = inputs["embeds_ratio"]
-        embeds_ratio_mask = embeds_ratio < 1.
-        mean_embeds_ratio = embeds_ratio[embeds_ratio_mask].mean()
-        mean_hidden_ratio = torch.sqrt(1 - embeds_ratio[embeds_ratio_mask] ** 2).mean()
-
+        # Token-Dependent Gated Residual: log thinking ratio based on thinking_mask
+        thinking_ratio = thinking_mask.float().mean() if thinking_mask is not None else torch.tensor(0.0)
+        
         if "train" in self._metrics:
             mode = "eval" if self.control.should_evaluate else "train"
-            self._metrics[mode]["embeds_ratio"].append(mean_embeds_ratio.item())
-            self._metrics[mode]["hidden_ratio"].append(mean_hidden_ratio.item())
+            self._metrics[mode]["thinking_ratio"].append(thinking_ratio.item())
             self._metrics[mode]["completion_length"].append(completion_length.item())
             self._metrics[mode]["kl"].append(mean_kl.item())
         else:
-            self._metrics["embeds_ratio"].append(mean_embeds_ratio.item())
-            self._metrics["hidden_ratio"].append(mean_hidden_ratio.item())
+            self._metrics["thinking_ratio"].append(thinking_ratio.item())
             self._metrics["completion_length"].append(completion_length.item())
             self._metrics["kl"].append(mean_kl.item())
         return loss

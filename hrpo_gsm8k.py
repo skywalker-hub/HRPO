@@ -24,7 +24,7 @@ def preprocess_gsm8k(split="train", chunk_size=1000) -> Dataset:
 
 def main(args):
     exp_name = (f"./experiments/{args.model_name.split('/')[-1]}-gsm8k-group{args.group_size}"
-                f"-lora{args.lora_rank}-rmin{args.residual_r_min}-temp{args.temperature}")
+                f"-lora{args.lora_rank}-temp{args.temperature}-tdgr")
     if os.path.exists(exp_name) and len(os.listdir(exp_name)) > 0:
         print(f"Experiment {exp_name} already exists. Exiting...")
         exit()
@@ -49,17 +49,12 @@ def main(args):
             "gate_proj", "up_proj", "down_proj",
         ],
         modules_to_save = [
-            "thinking_residual_gate_r",
-            "thinking_residual_gate_i",
-            "thinking_residual_Lambda",
-            "thinking_projection",
+            "info_head",
+            "token_gate_matrix",
         ], 
         lora_alpha = args.lora_rank * 2,
         use_gradient_checkpointing = "unsloth",
         random_state = args.seed,
-    )
-    model.model.model.thinking_residual_Lambda.reset_lambda_parameters(
-        r_min = args.residual_r_min, r_max = args.residual_r_max,
     )
 
     training_args = GRPOConfig(
@@ -101,9 +96,8 @@ def main(args):
     )
     patch_trainer_optimizer(
         trainer,
-        args.lr_residual_gate,
-        args.lr_residual_Lambda,
-        args.lr_thinking_projection,
+        args.lr_info_head,
+        args.lr_token_gate_matrix,
     )
     trainer.train()
 
@@ -114,11 +108,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--lr", type=float, default=5e-6)
     parser.add_argument("--beta", type=float, default=0.005)
-    parser.add_argument("--residual_r_min", type=float, default=0.99)
-    parser.add_argument("--residual_r_max", type=float, default=0.999)
-    parser.add_argument("--lr_residual_gate", type=float, default=1e-4)
-    parser.add_argument("--lr_residual_Lambda", type=float, default=1e-3)
-    parser.add_argument("--lr_thinking_projection", type=float, default=1e-4)
+    parser.add_argument("--lr_info_head", type=float, default=1e-4)
+    parser.add_argument("--lr_token_gate_matrix", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=0.1)
     parser.add_argument("--warmup_ratio", type=float, default=0.1)
     parser.add_argument("--lr_scheduler_type", type=str, default="cosine")

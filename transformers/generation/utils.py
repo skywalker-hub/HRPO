@@ -3284,7 +3284,7 @@ class GenerationMixin:
                 model_forward = self.get_compiled_call(generation_config.compile_config)
 
         is_prefill = True
-        is_thinking, last_thinking_states = None, None
+        is_thinking, last_hidden_states = None, None
         thinking_embeds = [self.get_input_embeddings()(input_ids)] if return_thinking_embeds else []
         thinking_mask = [
             torch.zeros_like(input_ids, dtype=torch.bool, device=input_ids.device)
@@ -3300,9 +3300,9 @@ class GenerationMixin:
             model_inputs.update({"output_attentions": output_attentions} if output_attentions else {})
             model_inputs.update({"output_hidden_states": output_hidden_states} if output_hidden_states else {})
 
-            # prepare is_thinking and last_thinking_states for latent reasoning
+            # prepare is_thinking and last_hidden_states for Token-Dependent Gated Residual mechanism
             model_inputs.update({"is_thinking": is_thinking} if is_thinking is not None else {})
-            model_inputs.update({"last_thinking_states": last_thinking_states} if last_thinking_states is not None else {})
+            model_inputs.update({"last_hidden_states": last_hidden_states} if last_hidden_states is not None else {})
 
             if is_prefill:
                 outputs = self(**model_inputs, return_dict=True)
@@ -3367,23 +3367,14 @@ class GenerationMixin:
             strs = processing_class.batch_decode(input_ids[:, input_len:])
             is_thinking = [self.answer_start not in s for s in strs]
             
-            # Generate last_thinking_states using learnable projection from hidden states
-            # This replaces the fixed vocabulary embedding weighted sum with a trainable mapping
+            # Save last hidden states for Token-Dependent Gated Residual mechanism
+            # These will be used to compute continuous bias in the next step
             if hasattr(outputs, 'last_hidden_state') and outputs.last_hidden_state is not None:
                 # Get the last token's hidden state (batch_size, hidden_dim)
-                last_token_hidden = outputs.last_hidden_state[:, -1, :]
-                # Apply learnable projection to generate thinking states
-                last_thinking_states = self.model.thinking_projection(last_token_hidden)
-                # Normalize to maintain consistent magnitude
-                last_thinking_states = last_thinking_states / (
-                    torch.norm(last_thinking_states, dim=-1, keepdim=True) + 1e-8
-                )
+                last_hidden_states = outputs.last_hidden_state[:, -1, :]
             else:
-                # Fallback: use original method if hidden states not available
-                last_thinking_states = torch.einsum(
-                    'bv,vd->bd', probs, self.get_input_embeddings().weight
-                )
-                last_thinking_states /= torch.sqrt((probs ** 2).sum(-1, keepdim=True)).to(last_thinking_states.dtype)
+                # Fallback: use zeros if hidden states not available
+                last_hidden_states = None
 
             if return_thinking_embeds and outputs.hidden_states is not None:
                 thinking_embeds.append(outputs.hidden_states[0].unsqueeze(1))
@@ -3391,7 +3382,7 @@ class GenerationMixin:
                     torch.tensor(outputs.hidden_states[1], device=input_ids.device).unsqueeze(1)
                 )
                 embeds_ratio.append(
-                    torch.tensor(outputs.hidden_states[2], device=input_ids.device).unsqueeze(1)
+                    outputs.hidden_states[2].unsqueeze(1)
                 )
 
             unfinished_sequences = unfinished_sequences & ~stopping_criteria(input_ids, scores)

@@ -488,29 +488,6 @@ LLAMA_INPUTS_DOCSTRING = r"""
 """
 
 
-class ThinkingResidualLambda(nn.Module):
-    c = 8.0
-
-    def __init__(self, config: LlamaConfig):
-        super().__init__()
-        self.Lambda = nn.Parameter(torch.randn(config.hidden_size))
-
-    def reset_lambda_parameters(
-            self, r_min=0.9, r_max=0.999
-        ):
-        with torch.no_grad():
-            nn.init.uniform_(self.Lambda, a=r_min, b=r_max)
-            self.Lambda.data.copy_(
-                - torch.log((self.Lambda ** (-1. / self.c) ) - 1)
-            )
-
-    def forward(self, r_t):
-        a_t = torch.exp(
-            - self.c * nn.functional.softplus(-self.Lambda, beta=1, threshold=20) * r_t
-        )
-        return a_t
-
-
 @add_start_docstrings(
     "The bare LLaMA Model outputting raw hidden-states without any specific head on top.",
     LLAMA_START_DOCSTRING,
@@ -536,23 +513,27 @@ class LlamaModel(LlamaPreTrainedModel):
         self.rotary_emb = LlamaRotaryEmbedding(config=config)
         self.gradient_checkpointing = False
 
-        self.thinking_residual_gate_r = nn.Linear(config.hidden_size, config.hidden_size)
-        self.thinking_residual_gate_i = nn.Linear(config.hidden_size, config.hidden_size)
-        self.thinking_residual_Lambda = ThinkingResidualLambda(config)
+        # Token-Dependent Gated Residual mechanism components
+        # info_head: Linear layer to extract continuous information from hidden states
+        self.info_head = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
         
-        # Thinking projection layer for learning context-aware continuous thinking representations
-        self.thinking_projection = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
+        # token_gate_matrix: Learnable embedding for token-dependent gating
+        # Shape: (vocab_size, hidden_dim), initialized to 0
+        self.token_gate_matrix = nn.Embedding(config.vocab_size, config.hidden_size)
 
         # Initialize weights and apply final processing
         self.post_init()
         
-        # Initialize thinking_projection with small variance to ensure initial behavior matches original model
-        self._init_thinking_projection()
+        # Initialize new components
+        self._init_thinking_components()
     
-    def _init_thinking_projection(self):
-        """Initialize thinking_projection with near-zero small variance for smooth transition."""
+    def _init_thinking_components(self):
+        """Initialize Token-Dependent Gated Residual components."""
         with torch.no_grad():
-            nn.init.normal_(self.thinking_projection.weight, mean=0.0, std=0.001)
+            # Initialize info_head with small variance for smooth transition
+            nn.init.normal_(self.info_head.weight, mean=0.0, std=0.001)
+            # Initialize token_gate_matrix to 0 (so exp(0) = 1, neutral gating initially)
+            nn.init.zeros_(self.token_gate_matrix.weight)
 
     def get_input_embeddings(self):
         return self.embed_tokens
@@ -560,11 +541,31 @@ class LlamaModel(LlamaPreTrainedModel):
     def set_input_embeddings(self, value):
         self.embed_tokens = value
 
-    def thinking_residual(self, embeds, residual, eps=1e-8):
-        r_t = torch.sigmoid(self.thinking_residual_gate_r(embeds))
-        i_t = torch.sigmoid(self.thinking_residual_gate_i(embeds))
-        a_t = self.thinking_residual_Lambda(r_t)
-        return a_t * embeds + torch.sqrt(1 - a_t.pow(2) + eps) * (i_t * residual), a_t
+    def compute_thinking_bias(self, previous_hidden_states, input_ids):
+        """
+        Compute the continuous bias using Token-Dependent Gated Residual mechanism.
+        
+        Args:
+            previous_hidden_states: Hidden states from previous step (batch_size, hidden_dim)
+            input_ids: Current token IDs (batch_size,) or (batch_size, seq_len)
+        
+        Returns:
+            continuous_bias: The bias to add to token embeddings (batch_size, hidden_dim)
+        """
+        # Step A: Extract continuous information from hidden states
+        # v_t = info_head(previous_hidden_states)
+        v_t = self.info_head(previous_hidden_states)
+        
+        # Step B: Token-specific gating with exponential activation
+        # g_k = exp(lookup(k))
+        gate_vectors = self.token_gate_matrix(input_ids)  # (batch_size, hidden_dim) or (batch_size, seq_len, hidden_dim)
+        g_k = torch.exp(gate_vectors)
+        
+        # Step C: Element-wise multiplication
+        # continuous_bias = v_t * g_k
+        continuous_bias = v_t * g_k
+        
+        return continuous_bias
 
     @add_start_docstrings_to_model_forward(LLAMA_INPUTS_DOCSTRING)
     def forward(
