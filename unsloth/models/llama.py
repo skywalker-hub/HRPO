@@ -665,6 +665,30 @@ def LlamaModel_fast_forward(
     thinking_hidden_states_cache = kwargs.get('thinking_hidden_states_cache', None)
     thinking_input_ids_cache = kwargs.get('thinking_input_ids_cache', None)
     
+    if thinking_mask is not None:
+        # Ensure thinking_mask matches inputs_embeds sequence length
+        seq_len = inputs_embeds.shape[1]
+        if thinking_mask.shape[1] != seq_len:
+            # Truncate or pad thinking_mask to match inputs_embeds
+            if thinking_mask.shape[1] > seq_len:
+                thinking_mask = thinking_mask[:, :seq_len]
+            else:
+                # Pad with False
+                pad_size = seq_len - thinking_mask.shape[1]
+                thinking_mask = torch.cat([
+                    thinking_mask,
+                    torch.zeros(thinking_mask.shape[0], pad_size, dtype=torch.bool, device=thinking_mask.device)
+                ], dim=1)
+        
+        # Also adjust caches if needed
+        if thinking_hidden_states_cache is not None and thinking_hidden_states_cache.shape[1] != seq_len:
+            if thinking_hidden_states_cache.shape[1] > seq_len:
+                thinking_hidden_states_cache = thinking_hidden_states_cache[:, :seq_len, :]
+        
+        if thinking_input_ids_cache is not None and thinking_input_ids_cache.shape[1] != seq_len:
+            if thinking_input_ids_cache.shape[1] > seq_len:
+                thinking_input_ids_cache = thinking_input_ids_cache[:, :seq_len]
+    
     if thinking_mask is not None and thinking_mask.any():
         new_inputs_embeds = inputs_embeds.clone()
         
