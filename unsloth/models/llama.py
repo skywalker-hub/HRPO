@@ -708,8 +708,9 @@ def LlamaModel_fast_forward(
             # Step A: Extract continuous information via info_head
             v_t = self.info_head(hidden_for_thinking)  # (num_thinking_positions, hidden_dim)
             
-            # Step B: Token-specific gating with exponential activation
+            # Step B: Token-specific gating with exponential activation (clamped to prevent explosion)
             gate_vectors = self.token_gate_matrix(ids_for_thinking)  # (num_thinking_positions, hidden_dim)
+            gate_vectors = torch.clamp(gate_vectors, min=-10.0, max=10.0)
             g_k = torch.exp(gate_vectors)
             
             # Step C: Element-wise multiplication to get continuous bias
@@ -1012,8 +1013,9 @@ def LlamaModel_fast_forward_inference(
             v_t = self.model.info_head(last_hidden_states)  # (batch_size, hidden_dim)
             
             # Step B: Token-specific gating with exponential activation
-            # g_k = exp(token_gate_matrix(input_ids))
+            # g_k = exp(token_gate_matrix(input_ids)) - clamped to prevent explosion
             gate_vectors = self.model.token_gate_matrix(input_ids.squeeze(-1))  # (batch_size, hidden_dim)
+            gate_vectors = torch.clamp(gate_vectors, min=-10.0, max=10.0)
             g_k = torch.exp(gate_vectors)
             
             # Step C: Element-wise multiplication to get continuous bias

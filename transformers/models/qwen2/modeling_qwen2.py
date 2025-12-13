@@ -535,8 +535,9 @@ class Qwen2Model(Qwen2PreTrainedModel):
         v_t = self.info_head(previous_hidden_states)
         
         # Step B: Token-specific gating with exponential activation
-        # g_k = exp(lookup(k))
+        # g_k = exp(clamp(lookup(k))) - clamp to prevent numerical explosion
         gate_vectors = self.token_gate_matrix(input_ids)  # (batch_size, hidden_dim) or (batch_size, seq_len, hidden_dim)
+        gate_vectors = torch.clamp(gate_vectors, min=-10.0, max=10.0)  # Prevent exp() explosion
         g_k = torch.exp(gate_vectors)
         
         # Step C: Element-wise multiplication
