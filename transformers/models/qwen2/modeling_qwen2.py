@@ -580,6 +580,46 @@ class Qwen2Model(Qwen2PreTrainedModel):
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
 
+        # Token-Dependent Gated Residual mechanism: apply continuous bias if last_hidden_states is provided
+        is_thinking = flash_attn_kwargs.get('is_thinking', None)
+        last_hidden_states = flash_attn_kwargs.get('last_hidden_states', None)
+        
+        if is_thinking is not None and last_hidden_states is not None:
+            # Compute continuous bias using Token-Dependent Gated Residual mechanism
+            # This is used during generation to inject thinking information
+            # Use the last token ID for token-dependent gating (during generation, we process one token at a time)
+            if input_ids is not None:
+                # Get the last token ID for each sequence in the batch
+                current_token_ids = input_ids[:, -1] if input_ids.dim() > 1 else input_ids
+            else:
+                # Fallback: if input_ids is None, we can't compute token-dependent gating
+                current_token_ids = None
+            
+            if current_token_ids is not None:
+                continuous_bias = self.compute_thinking_bias(last_hidden_states, current_token_ids)
+                
+                # Apply bias only to thinking positions
+                if isinstance(is_thinking, list):
+                    is_thinking_tensor = torch.tensor(is_thinking, device=inputs_embeds.device, dtype=torch.bool)
+                else:
+                    is_thinking_tensor = is_thinking if isinstance(is_thinking, torch.Tensor) else torch.tensor(is_thinking, device=inputs_embeds.device, dtype=torch.bool)
+                
+                # Expand continuous_bias to match sequence length if needed
+                if continuous_bias.dim() == 2 and inputs_embeds.dim() == 3:
+                    # continuous_bias is (batch_size, hidden_dim), expand to (batch_size, seq_len, hidden_dim)
+                    seq_len = inputs_embeds.shape[1]
+                    continuous_bias = continuous_bias.unsqueeze(1).expand(-1, seq_len, -1)
+                
+                # Apply bias only where is_thinking is True
+                if is_thinking_tensor.dim() == 1:
+                    # Broadcast to sequence dimension
+                    is_thinking_tensor = is_thinking_tensor.unsqueeze(1)
+                
+                # Add continuous bias to token embeddings for thinking positions
+                inputs_embeds = inputs_embeds.clone()
+                if is_thinking_tensor.any():
+                    inputs_embeds[is_thinking_tensor] = (inputs_embeds[is_thinking_tensor] + continuous_bias[is_thinking_tensor]).to(inputs_embeds.dtype)
+
         if use_cache and past_key_values is None:
             past_key_values = DynamicCache()
 
