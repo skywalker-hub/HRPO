@@ -599,25 +599,26 @@ class Qwen2Model(Qwen2PreTrainedModel):
                 continuous_bias = self.compute_thinking_bias(last_hidden_states, current_token_ids)
                 
                 # Apply bias only to thinking positions
+                # is_thinking is a list/tensor of shape (batch_size,) indicating which sequences are thinking
                 if isinstance(is_thinking, list):
                     is_thinking_tensor = torch.tensor(is_thinking, device=inputs_embeds.device, dtype=torch.bool)
                 else:
                     is_thinking_tensor = is_thinking if isinstance(is_thinking, torch.Tensor) else torch.tensor(is_thinking, device=inputs_embeds.device, dtype=torch.bool)
                 
+                # Ensure is_thinking_tensor is 1D (batch_size,) for proper batch-level indexing
+                if is_thinking_tensor.dim() > 1:
+                    is_thinking_tensor = is_thinking_tensor.squeeze()
+                
                 # Expand continuous_bias to match sequence length if needed
+                # continuous_bias: (batch_size, hidden_dim) -> (batch_size, seq_len, hidden_dim)
                 if continuous_bias.dim() == 2 and inputs_embeds.dim() == 3:
-                    # continuous_bias is (batch_size, hidden_dim), expand to (batch_size, seq_len, hidden_dim)
                     seq_len = inputs_embeds.shape[1]
                     continuous_bias = continuous_bias.unsqueeze(1).expand(-1, seq_len, -1)
                 
-                # Apply bias only where is_thinking is True
-                if is_thinking_tensor.dim() == 1:
-                    # Broadcast to sequence dimension
-                    is_thinking_tensor = is_thinking_tensor.unsqueeze(1)
-                
-                # Add continuous bias to token embeddings for thinking positions
-                inputs_embeds = inputs_embeds.clone()
+                # Add continuous bias to token embeddings for thinking sequences
+                # Using 1D boolean indexing: inputs_embeds[is_thinking_tensor] selects (num_thinking, seq_len, hidden_dim)
                 if is_thinking_tensor.any():
+                    inputs_embeds = inputs_embeds.clone()
                     inputs_embeds[is_thinking_tensor] = (inputs_embeds[is_thinking_tensor] + continuous_bias[is_thinking_tensor]).to(inputs_embeds.dtype)
 
         if use_cache and past_key_values is None:
