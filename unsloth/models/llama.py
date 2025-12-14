@@ -708,13 +708,13 @@ def LlamaModel_fast_forward(
             # Step A: Extract continuous information via info_head
             v_t = self.info_head(hidden_for_thinking)  # (num_thinking_positions, hidden_dim)
             
-            # Step B: Token-specific gating with exponential activation (clamped to prevent explosion)
+            # Step B: Token-specific gating with stable activation
+            # g_k = 1 + tanh(lookup(k)) - outputs in range (0, 2), stable and centered at 1
             gate_vectors = self.token_gate_matrix(ids_for_thinking)  # (num_thinking_positions, hidden_dim)
-            gate_vectors = torch.clamp(gate_vectors, min=-10.0, max=10.0)
-            g_k = torch.exp(gate_vectors)
+            g_k = 1.0 + torch.tanh(gate_vectors)
             
-            # Step C: Element-wise multiplication to get continuous bias
-            continuous_bias = v_t * g_k  # (num_thinking_positions, hidden_dim)
+            # Step C: Element-wise multiplication with learnable scale
+            continuous_bias = self.thinking_scale * v_t * g_k  # (num_thinking_positions, hidden_dim)
             
             # Step D: Residual injection
             # inputs_embeds = original_token_embeds + continuous_bias
@@ -1012,14 +1012,13 @@ def LlamaModel_fast_forward_inference(
             # v_t = info_head(last_hidden_states)
             v_t = self.model.info_head(last_hidden_states)  # (batch_size, hidden_dim)
             
-            # Step B: Token-specific gating with exponential activation
-            # g_k = exp(token_gate_matrix(input_ids)) - clamped to prevent explosion
+            # Step B: Token-specific gating with stable activation
+            # g_k = 1 + tanh(token_gate_matrix(input_ids)) - stable activation
             gate_vectors = self.model.token_gate_matrix(input_ids.squeeze(-1))  # (batch_size, hidden_dim)
-            gate_vectors = torch.clamp(gate_vectors, min=-10.0, max=10.0)
-            g_k = torch.exp(gate_vectors)
+            g_k = 1.0 + torch.tanh(gate_vectors)  # Range: (0, 2), initial value: 1
             
-            # Step C: Element-wise multiplication to get continuous bias
-            continuous_bias = v_t * g_k  # (batch_size, hidden_dim)
+            # Step C: Element-wise multiplication with learnable scale
+            continuous_bias = self.model.thinking_scale * v_t * g_k  # (batch_size, hidden_dim)
             
             # Step D: Residual injection (only for thinking positions)
             # inputs_embeds = original_token_embeds + continuous_bias
@@ -1110,7 +1109,7 @@ def LlamaModel_fast_forward_inference(
         hidden_states_output = [thinking_embeds, is_thinking, embeds_ratio]
     else:
         hidden_states_output = None
-    
+
     return BaseModelOutputWithPast(
         last_hidden_state = X,
         past_key_values = next_decoder_cache,
@@ -2375,7 +2374,7 @@ class FastLlamaModel:
                 if modules_to_save is None: modules_to_save = ["embed_tokens"]
                 else: modules_to_save.append("embed_tokens")
 
-            elif module in ("info_head", "token_gate_matrix"):
+            elif module in ("info_head", "token_gate_matrix", "thinking_scale"):
                 train_thinking_components = True
                 if modules_to_save is None: modules_to_save = [module]
                 else: modules_to_save.append(module)
@@ -2430,12 +2429,12 @@ class FastLlamaModel:
                     train_lm_head = True
                 elif module == "embed_tokens":
                     train_embed_tokens = True
-                elif module in ("info_head", "token_gate_matrix"):
+                elif module in ("info_head", "token_gate_matrix", "thinking_scale"):
                     train_thinking_components = True
                 else:
                     raise TypeError(
                         f"Unsloth: Module = {module} is not allowed. Only 'lm_head', 'embed_tokens', "
-                        "'info_head' and 'token_gate_matrix' components are allowed."
+                        "'info_head', 'token_gate_matrix' and 'thinking_scale' components are allowed."
                     )
             pass
         pass
@@ -2563,6 +2562,11 @@ class FastLlamaModel:
                     model.model.model.token_gate_matrix.modules_to_save.default\
                         .to(device = "cuda", dtype = new_dtype, non_blocking = True)
                     model.model.model.token_gate_matrix.modules_to_save.default.requires_grad_(True)
+                if module == "thinking_scale":
+                    # thinking_scale is a simple Parameter, not a module with modules_to_save
+                    if hasattr(model.model.model, "thinking_scale"):
+                        model.model.model.thinking_scale.data = model.model.model.thinking_scale.data.to(device="cuda", dtype=torch.float32)
+                        model.model.model.thinking_scale.requires_grad_(True)
 
         # Patch tokenizer to pad to the right
         internal_model = model

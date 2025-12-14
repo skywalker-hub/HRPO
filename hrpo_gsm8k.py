@@ -51,6 +51,7 @@ def main(args):
         modules_to_save = [
             "info_head",
             "token_gate_matrix",
+            "thinking_scale",
         ], 
         lora_alpha = args.lora_rank * 2,
         use_gradient_checkpointing = "unsloth",
@@ -98,6 +99,7 @@ def main(args):
         trainer,
         args.lr_info_head,
         args.lr_token_gate_matrix,
+        args.lr_thinking_scale,
     )
     trainer.train()
 
@@ -110,6 +112,7 @@ if __name__ == "__main__":
     parser.add_argument("--beta", type=float, default=0.005)
     parser.add_argument("--lr_info_head", type=float, default=1e-4)
     parser.add_argument("--lr_token_gate_matrix", type=float, default=1e-4)
+    parser.add_argument("--lr_thinking_scale", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=0.1)
     parser.add_argument("--warmup_ratio", type=float, default=0.1)
     parser.add_argument("--lr_scheduler_type", type=str, default="cosine")

@@ -513,7 +513,7 @@ def grpo_trainer_compute_loss(function_name, function):
         # Log the metrics
         # Token-Dependent Gated Residual: log thinking ratio based on thinking_mask
         thinking_ratio = thinking_mask.float().mean() if thinking_mask is not None else torch.tensor(0.0)
-        
+
         if "train" in self._metrics:
             mode = "eval" if self.control.should_evaluate else "train"
             self._metrics[mode]["thinking_ratio"].append(thinking_ratio.item())

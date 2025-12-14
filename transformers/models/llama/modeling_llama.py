@@ -520,6 +520,9 @@ class LlamaModel(LlamaPreTrainedModel):
         # token_gate_matrix: Learnable embedding for token-dependent gating
         # Shape: (vocab_size, hidden_dim), initialized to 0
         self.token_gate_matrix = nn.Embedding(config.vocab_size, config.hidden_size)
+        
+        # Learnable scale factor for continuous_bias, initialized small for stable training
+        self.thinking_scale = nn.Parameter(torch.tensor(0.01))
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -556,15 +559,14 @@ class LlamaModel(LlamaPreTrainedModel):
         # v_t = info_head(previous_hidden_states)
         v_t = self.info_head(previous_hidden_states)
         
-        # Step B: Token-specific gating with exponential activation
-        # g_k = exp(clamp(lookup(k))) - clamp to prevent numerical explosion
+        # Step B: Token-specific gating with stable activation
+        # g_k = 1 + tanh(lookup(k)) - outputs in range (0, 2), stable and centered at 1
         gate_vectors = self.token_gate_matrix(input_ids)  # (batch_size, hidden_dim) or (batch_size, seq_len, hidden_dim)
-        gate_vectors = torch.clamp(gate_vectors, min=-10.0, max=10.0)  # Prevent exp() explosion
-        g_k = torch.exp(gate_vectors)
+        g_k = 1.0 + torch.tanh(gate_vectors)  # Range: (0, 2), initial value: 1
         
-        # Step C: Element-wise multiplication
-        # continuous_bias = v_t * g_k
-        continuous_bias = v_t * g_k
+        # Step C: Element-wise multiplication with learnable scale
+        # continuous_bias = scale * v_t * g_k
+        continuous_bias = self.thinking_scale * v_t * g_k
         
         return continuous_bias
 

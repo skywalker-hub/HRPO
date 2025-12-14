@@ -3384,10 +3384,10 @@ class GenerationMixin:
                     gate_magnitude = outputs.hidden_states[2]
                     
                     thinking_embeds.append(continuous_bias.unsqueeze(1))
-                    thinking_mask.append(
+                thinking_mask.append(
                         torch.tensor(is_thinking_flags, device=input_ids.device).unsqueeze(1)
-                    )
-                    embeds_ratio.append(
+                )
+                embeds_ratio.append(
                         gate_magnitude.unsqueeze(1) if isinstance(gate_magnitude, torch.Tensor) else torch.ones(input_ids.size(0), 1, device=input_ids.device)
                     )
                 else:
