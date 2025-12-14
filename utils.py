@@ -107,13 +107,32 @@ def reward_func_rag(completions, answer, **kwargs) -> list[float]:
 
 def delete_extra_zero(n):
     try:
-        n=float(n)
+        # 如果是分数形式（如 "3/5"），先计算再转换
+        if "/" in str(n):
+            parts = str(n).split("/")
+            if len(parts) == 2:
+                try:
+                    numerator = float(parts[0])
+                    denominator = float(parts[1])
+                    if denominator != 0:
+                        n = numerator / denominator
+                    else:
+                        print("Conversion to floating number fails: division by zero in {}".format(n))
+                        return str(n)
+                except:
+                    print("Conversion to floating number fails: {}".format(n))
+                    return str(n)
+            else:
+                print("Conversion to floating number fails: invalid fraction format {}".format(n))
+                return str(n)
+        else:
+            n = float(n)
     except:
         try:
             n = eval(n)
         except:
             print("Conversion to floating number fails: {}".format(n))
-            return n
+            return str(n)
     if isinstance(n, int):
         return str(n)
     if isinstance(n, float):
@@ -267,8 +286,13 @@ def _strip_string(string):
 
 def process_gsm8k_answer(pred: str) -> str:
     pred = pred.strip("\n").rstrip(".").rstrip("/").strip(" ")
+    # 修复正则表达式：避免匹配不完整的分数（如 20/），只匹配完整的数字或分数
+    # 匹配：整数、小数、完整分数（如 3/5），但不匹配单独的斜杠
+    numbers = re.findall(r"-?\d+\.?\d*(?:/\d+)?", pred)
+    # 过滤掉不完整的分数（以斜杠结尾的）
+    numbers = [s for s in numbers if not s.endswith("/")]
     pred = [delete_extra_zero(s.replace(",", "")) 
-            for s in re.findall(r"-?\d+/?\.?\d*", pred)]
+            for s in numbers]
 
     if len(pred) == 0:
         pred = ""

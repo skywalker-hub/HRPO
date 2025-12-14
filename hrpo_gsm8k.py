@@ -107,23 +107,25 @@ if __name__ == "__main__":
     parser.add_argument("--lora_rank", type=int, default=32)
 
     parser.add_argument("--lr", type=float, default=5e-6)
-    parser.add_argument("--beta", type=float, default=0.005)
+    # 增加beta值以更好地约束KL散度，防止模型偏离参考模型太远
+    parser.add_argument("--beta", type=float, default=0.1)
     parser.add_argument("--lr_info_head", type=float, default=1e-4)
     parser.add_argument("--lr_token_gate_matrix", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=0.1)
-    parser.add_argument("--warmup_ratio", type=float, default=0.1)
-    parser.add_argument("--lr_scheduler_type", type=str, default="cosine")
+    # 减少warmup比例，确保学习率不会过早降为0
+    parser.add_argument("--warmup_ratio", type=float, default=0.03)
+    # 使用linear调度器而不是cosine，避免学习率过早降为0
+    parser.add_argument("--lr_scheduler_type", type=str, default="linear")
     parser.add_argument("--optimizer", type=str, default="paged_adamw_8bit")
-    parser.add_argument("--max_grad_norm", type=float, default=0.1)
+    # 增强梯度裁剪，防止梯度爆炸
+    parser.add_argument("--max_grad_norm", type=float, default=1.0)
 
     parser.add_argument("--group_size", type=int, default=4)
     parser.add_argument("--temperature", type=float, default=0.5)
     
-    #parser.add_argument("--gradient_accumulation_steps", type=int, default=8)
-    #parser.add_argument("--per_device_train_batch_size", type=int, default=4)
-
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=4)
-    parser.add_argument("--per_device_train_batch_size", type=int, default=160)
+    # 降低batch size以提高训练稳定性
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=8)
+    parser.add_argument("--per_device_train_batch_size", type=int, default=4)
 
     
     parser.add_argument("--max_prompt_length", type=int, default=1024)
