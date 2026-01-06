@@ -534,11 +534,10 @@ class Qwen2Model(Qwen2PreTrainedModel):
         # v_t = info_head(previous_hidden_states)
         v_t = self.info_head(previous_hidden_states)
         
-        # Step B: Token-specific gating with exponential activation
-        # g_k = exp(clamp(lookup(k))) - clamp to prevent numerical explosion
+        # Step B: Token-specific gating with softmax activation
+        # g_k = softmax(lookup(k)) - softmax normalizes to [0,1] range, preventing numerical explosion
         gate_vectors = self.token_gate_matrix(input_ids)  # (batch_size, hidden_dim) or (batch_size, seq_len, hidden_dim)
-        gate_vectors = torch.clamp(gate_vectors, min=-10.0, max=10.0)  # Prevent exp() explosion
-        g_k = torch.exp(gate_vectors)
+        g_k = torch.softmax(gate_vectors, dim=-1)  # Softmax over hidden_dim for stable gating
         
         # Step C: Element-wise multiplication
         # continuous_bias = v_t * g_k

@@ -708,10 +708,9 @@ def LlamaModel_fast_forward(
             # Step A: Extract continuous information via info_head
             v_t = self.info_head(hidden_for_thinking)  # (num_thinking_positions, hidden_dim)
             
-            # Step B: Token-specific gating with exponential activation (clamped to prevent explosion)
+            # Step B: Token-specific gating with softmax activation
             gate_vectors = self.token_gate_matrix(ids_for_thinking)  # (num_thinking_positions, hidden_dim)
-            gate_vectors = torch.clamp(gate_vectors, min=-10.0, max=10.0)
-            g_k = torch.exp(gate_vectors)
+            g_k = torch.softmax(gate_vectors, dim=-1)  # Softmax over hidden_dim for stable gating
             
             # Step C: Element-wise multiplication to get continuous bias
             continuous_bias = v_t * g_k  # (num_thinking_positions, hidden_dim)
@@ -1012,11 +1011,10 @@ def LlamaModel_fast_forward_inference(
             # v_t = info_head(last_hidden_states)
             v_t = self.model.info_head(last_hidden_states)  # (batch_size, hidden_dim)
             
-            # Step B: Token-specific gating with exponential activation
-            # g_k = exp(token_gate_matrix(input_ids)) - clamped to prevent explosion
+            # Step B: Token-specific gating with softmax activation
+            # g_k = softmax(token_gate_matrix(input_ids)) - softmax normalizes to [0,1] range
             gate_vectors = self.model.token_gate_matrix(input_ids.squeeze(-1))  # (batch_size, hidden_dim)
-            gate_vectors = torch.clamp(gate_vectors, min=-10.0, max=10.0)
-            g_k = torch.exp(gate_vectors)
+            g_k = torch.softmax(gate_vectors, dim=-1)  # Softmax over hidden_dim for stable gating
             
             # Step C: Element-wise multiplication to get continuous bias
             continuous_bias = v_t * g_k  # (batch_size, hidden_dim)
