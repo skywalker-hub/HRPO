@@ -530,9 +530,10 @@ class LlamaModel(LlamaPreTrainedModel):
     def _init_thinking_components(self):
         """Initialize Token-Dependent Gated Residual components."""
         with torch.no_grad():
-            # Initialize info_head with small variance for smooth transition
-            nn.init.normal_(self.info_head.weight, mean=0.0, std=0.001)
-            # Initialize token_gate_matrix to 0 (so exp(0) = 1, neutral gating initially)
+            # Initialize info_head with moderate variance for meaningful gradient signal
+            # std=0.02 is closer to standard transformer init (1/sqrt(hidden_dim) ≈ 0.026 for dim=1536)
+            nn.init.normal_(self.info_head.weight, mean=0.0, std=0.02)
+            # Initialize token_gate_matrix to 0 (so 2*sigmoid(0)=1, neutral gating initially)
             nn.init.zeros_(self.token_gate_matrix.weight)
 
     def get_input_embeddings(self):
@@ -556,10 +557,10 @@ class LlamaModel(LlamaPreTrainedModel):
         # v_t = info_head(previous_hidden_states)
         v_t = self.info_head(previous_hidden_states)
         
-        # Step B: Token-specific gating with softmax activation
-        # g_k = softmax(lookup(k)) - softmax normalizes to [0,1] range, preventing numerical explosion
+        # Step B: Token-specific gating with scaled sigmoid activation
+        # g_k = 2 * sigmoid(lookup(k)) - each dimension independent, range [0, 2], initial value = 1
         gate_vectors = self.token_gate_matrix(input_ids)  # (batch_size, hidden_dim) or (batch_size, seq_len, hidden_dim)
-        g_k = torch.softmax(gate_vectors, dim=-1)  # Softmax over hidden_dim for stable gating
+        g_k = 2.0 * torch.sigmoid(gate_vectors)  # sigmoid(0)=0.5, so 2*0.5=1 initially
         
         # Step C: Element-wise multiplication
         # continuous_bias = v_t * g_k
