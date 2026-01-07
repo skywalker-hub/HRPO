@@ -2,7 +2,7 @@ import types
 from transformers.trainer import *
 
 
-def patch_trainer_optimizer(trainer, lr_info_head=1e-4, lr_token_gate_matrix=1e-4):
+def patch_trainer_optimizer(trainer, lr_info_head=1e-4, lr_token_gate_matrix=1e-4, lr_thinking_scale=1e-3):
     """
     Patch the trainer optimizer for Token-Dependent Gated Residual mechanism.
     
@@ -10,6 +10,7 @@ def patch_trainer_optimizer(trainer, lr_info_head=1e-4, lr_token_gate_matrix=1e-
         trainer: The trainer instance
         lr_info_head: Learning rate for info_head linear layer (default: 1e-4)
         lr_token_gate_matrix: Learning rate for token_gate_matrix embedding (default: 1e-4)
+        lr_thinking_scale: Learning rate for thinking_scale parameter (default: 1e-3)
     """
     def create_optimizer(self):
         """
@@ -22,17 +23,21 @@ def patch_trainer_optimizer(trainer, lr_info_head=1e-4, lr_token_gate_matrix=1e-
 
         if self.optimizer is None:
             decay_parameters = self.get_decay_parameter_names(opt_model)
+            # TDGR module names to exclude from default optimizer groups
+            tdgr_modules = ["info_head", "token_gate_matrix", "thinking_scale"]
+            is_tdgr = lambda n: any(m in n for m in tdgr_modules)
+            
             optimizer_grouped_parameters = [
                 {
                     "params": [
-                        p for n, p in opt_model.named_parameters() if ("info_head" not in n and "token_gate_matrix" not in n and n in decay_parameters and p.requires_grad)
+                        p for n, p in opt_model.named_parameters() if (not is_tdgr(n) and n in decay_parameters and p.requires_grad)
                     ],
                     "lr": self.args.learning_rate,
                     "weight_decay": self.args.weight_decay,
                 },
                 {
                     "params": [
-                        p for n, p in opt_model.named_parameters() if ("info_head" not in n and "token_gate_matrix" not in n and n not in decay_parameters and p.requires_grad)
+                        p for n, p in opt_model.named_parameters() if (not is_tdgr(n) and n not in decay_parameters and p.requires_grad)
                     ],
                     "lr": self.args.learning_rate,
                     "weight_decay": 0.0,
@@ -50,6 +55,13 @@ def patch_trainer_optimizer(trainer, lr_info_head=1e-4, lr_token_gate_matrix=1e-
                     ],
                     "lr": lr_token_gate_matrix,
                     "weight_decay": self.args.weight_decay,
+                },
+                {
+                    "params": [
+                        p for n, p in opt_model.named_parameters() if ("thinking_scale" in n and p.requires_grad)
+                    ],
+                    "lr": lr_thinking_scale,
+                    "weight_decay": 0.0,  # No weight decay for scale parameter
                 },
             ]
 

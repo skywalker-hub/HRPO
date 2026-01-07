@@ -712,8 +712,10 @@ def LlamaModel_fast_forward(
             gate_vectors = self.token_gate_matrix(ids_for_thinking)  # (num_thinking_positions, hidden_dim)
             g_k = 2.0 * torch.sigmoid(gate_vectors)  # sigmoid(0)=0.5, so 2*0.5=1 initially
             
-            # Step C: Element-wise multiplication to get continuous bias
-            continuous_bias = v_t * g_k  # (num_thinking_positions, hidden_dim)
+            # Step C: Element-wise multiplication with learnable scale
+            # scale starts at sigmoid(-4)≈0.018, gradually increases during training
+            scale = torch.sigmoid(self.thinking_scale)
+            continuous_bias = scale * v_t * g_k  # (num_thinking_positions, hidden_dim)
             
             # Step D: Residual injection
             # inputs_embeds = original_token_embeds + continuous_bias
@@ -1016,8 +1018,10 @@ def LlamaModel_fast_forward_inference(
             gate_vectors = self.model.token_gate_matrix(input_ids.squeeze(-1))  # (batch_size, hidden_dim)
             g_k = 2.0 * torch.sigmoid(gate_vectors)  # sigmoid(0)=0.5, so 2*0.5=1 initially
             
-            # Step C: Element-wise multiplication to get continuous bias
-            continuous_bias = v_t * g_k  # (batch_size, hidden_dim)
+            # Step C: Element-wise multiplication with learnable scale
+            # scale starts at sigmoid(-4)≈0.018, gradually increases during training
+            scale = torch.sigmoid(self.model.thinking_scale)
+            continuous_bias = scale * v_t * g_k  # (batch_size, hidden_dim)
             
             # Step D: Residual injection (only for thinking positions)
             # inputs_embeds = original_token_embeds + continuous_bias

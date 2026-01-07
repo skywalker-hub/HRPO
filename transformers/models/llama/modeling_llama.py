@@ -520,6 +520,10 @@ class LlamaModel(LlamaPreTrainedModel):
         # token_gate_matrix: Learnable embedding for token-dependent gating
         # Shape: (vocab_size, hidden_dim), initialized to 0
         self.token_gate_matrix = nn.Embedding(config.vocab_size, config.hidden_size)
+        
+        # Learnable scaling factor for continuous bias (initialized small to prevent explosion)
+        # sigmoid(-4) ≈ 0.018, so initial continuous_bias is scaled down ~55x
+        self.thinking_scale = nn.Parameter(torch.tensor(-4.0))
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -530,11 +534,11 @@ class LlamaModel(LlamaPreTrainedModel):
     def _init_thinking_components(self):
         """Initialize Token-Dependent Gated Residual components."""
         with torch.no_grad():
-            # Initialize info_head with moderate variance for meaningful gradient signal
-            # std=0.02 is closer to standard transformer init (1/sqrt(hidden_dim) ≈ 0.026 for dim=1536)
-            nn.init.normal_(self.info_head.weight, mean=0.0, std=0.02)
+            # Initialize info_head with small variance to prevent explosion
+            nn.init.normal_(self.info_head.weight, mean=0.0, std=0.01)
             # Initialize token_gate_matrix to 0 (so 2*sigmoid(0)=1, neutral gating initially)
             nn.init.zeros_(self.token_gate_matrix.weight)
+            # thinking_scale is already initialized to -4 in __init__
 
     def get_input_embeddings(self):
         return self.embed_tokens
@@ -562,9 +566,10 @@ class LlamaModel(LlamaPreTrainedModel):
         gate_vectors = self.token_gate_matrix(input_ids)  # (batch_size, hidden_dim) or (batch_size, seq_len, hidden_dim)
         g_k = 2.0 * torch.sigmoid(gate_vectors)  # sigmoid(0)=0.5, so 2*0.5=1 initially
         
-        # Step C: Element-wise multiplication
-        # continuous_bias = v_t * g_k
-        continuous_bias = v_t * g_k
+        # Step C: Element-wise multiplication with learnable scale
+        # scale starts at sigmoid(-4)≈0.018, gradually increases during training
+        scale = torch.sigmoid(self.thinking_scale)
+        continuous_bias = scale * v_t * g_k
         
         return continuous_bias
 
