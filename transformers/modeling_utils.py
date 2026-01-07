@@ -5263,7 +5263,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             if param.device == torch.device("meta"):
                 # upcast in fp32 if any
                 target_dtype = dtype
-                value = torch.empty(*param.size(), dtype=target_dtype)
+                value = torch.empty(param.shape, dtype=target_dtype)
                 if (
                     not is_quantized
                     or (getattr(hf_quantizer, "requires_parameters_quantization", False))
