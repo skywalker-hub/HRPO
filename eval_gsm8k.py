@@ -159,11 +159,19 @@ if __name__ == "__main__":
 
     base_model = None
     checkpoint_path = args.checkpoint_path
+    # 本地模型路径映射
+    local_model_paths = {
+        "Qwen2.5-1.5B-Instruct": "/root/autodl-tmp/models/Qwen2.5-1.5B-Instruct",
+        "Qwen2.5-3B-Instruct": "/root/autodl-tmp/models/Qwen2.5-3B-Instruct"
+    }
     base_models = ["Qwen/Qwen2.5-1.5B-Instruct", "Qwen/Qwen2.5-3B-Instruct"]
     for model in base_models:
-        if model.split('/')[-1] in checkpoint_path:
-            base_model = model
-    temperature = float(checkpoint_path.split('-temp')[-1].split('/')[0])
+        model_name = model.split('/')[-1]
+        if model_name in checkpoint_path:
+            # 使用本地路径
+            base_model = local_model_paths.get(model_name, model)
+    #temperature = float(checkpoint_path.split('-temp')[-1].split('/')[0])
+    temperature =0.9
     print(checkpoint_path, base_model, temperature)
 
     if 'eval_results.json' not in os.listdir(checkpoint_path):
