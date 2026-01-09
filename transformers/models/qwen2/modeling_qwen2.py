@@ -539,8 +539,9 @@ class Qwen2Model(Qwen2PreTrainedModel):
         gate_vectors = self.token_gate_matrix(input_ids)  # (batch_size, hidden_dim) or (batch_size, seq_len, hidden_dim)
         g_k = torch.sigmoid(gate_vectors)  # Sigmoid allows independent control per dimension
         
-        # Step B.1: L2 normalize to match softmax scale (sum ≈ 1 equivalent)
-        g_k = g_k / (torch.norm(g_k, dim=-1, keepdim=True) + 1e-8)
+        # Step B.1: L1 normalize to match softmax constraint (sum = 1)
+        # This ensures the same scale as softmax while preserving sigmoid's independent activation
+        g_k = g_k / (g_k.sum(dim=-1, keepdim=True) + 1e-8)
         
         # Step C: Element-wise multiplication
         # continuous_bias = v_t * g_k
