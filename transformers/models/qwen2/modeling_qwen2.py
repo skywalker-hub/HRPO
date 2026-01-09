@@ -534,10 +534,10 @@ class Qwen2Model(Qwen2PreTrainedModel):
         # v_t = info_head(previous_hidden_states)
         v_t = self.info_head(previous_hidden_states)
         
-        # Step B: Token-specific gating with softmax activation
-        # g_k = softmax(lookup(k)) - softmax normalizes to [0,1] range, preventing numerical explosion
+        # Step B: Token-specific gating with sigmoid activation
+        # g_k = sigmoid(lookup(k)) - sigmoid maps to [0,1] range independently per dimension
         gate_vectors = self.token_gate_matrix(input_ids)  # (batch_size, hidden_dim) or (batch_size, seq_len, hidden_dim)
-        g_k = torch.softmax(gate_vectors, dim=-1)  # Softmax over hidden_dim for stable gating
+        g_k = torch.sigmoid(gate_vectors)  # Sigmoid allows independent control per dimension
         
         # Step C: Element-wise multiplication
         # continuous_bias = v_t * g_k
