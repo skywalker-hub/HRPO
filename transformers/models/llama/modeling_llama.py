@@ -532,8 +532,9 @@ class LlamaModel(LlamaPreTrainedModel):
         with torch.no_grad():
             # Initialize info_head with small variance for smooth transition
             nn.init.normal_(self.info_head.weight, mean=0.0, std=0.001)
-            # Initialize token_gate_matrix to 0 (so exp(0) = 1, neutral gating initially)
-            nn.init.zeros_(self.token_gate_matrix.weight)
+            # Initialize token_gate_matrix to negative values so sigmoid starts near 0 (gate closed)
+            # sigmoid(-4) ≈ 0.018, allowing gradual learning to "open" gates
+            nn.init.constant_(self.token_gate_matrix.weight, -4.0)
 
     def get_input_embeddings(self):
         return self.embed_tokens
@@ -556,18 +557,19 @@ class LlamaModel(LlamaPreTrainedModel):
         # v_t = info_head(previous_hidden_states)
         v_t = self.info_head(previous_hidden_states)
         
-        # Step B: Token-specific gating with sigmoid activation
-        # g_k = sigmoid(lookup(k)) - sigmoid maps to [0,1] range independently per dimension
+        # Step B: RMSNorm on v_t to stabilize scale (direction only, remove unstable magnitude)
+        v_t_rms = torch.sqrt(torch.mean(v_t ** 2, dim=-1, keepdim=True) + 1e-8)
+        v_t_norm = v_t / v_t_rms
+        
+        # Step C: Token-specific gating with sigmoid activation (NO normalization - preserve independence)
+        # g_k = sigmoid(lookup(k)) - each dimension independently decides how much info passes through
         gate_vectors = self.token_gate_matrix(input_ids)  # (batch_size, hidden_dim) or (batch_size, seq_len, hidden_dim)
-        g_k = torch.sigmoid(gate_vectors)  # Sigmoid allows independent control per dimension
+        g_k = torch.sigmoid(gate_vectors)  # Independent gates, can be all-open, all-closed, or mixed
         
-        # Step B.1: L1 normalize to match softmax constraint (sum = 1)
-        # This ensures the same scale as softmax while preserving sigmoid's independent activation
-        g_k = g_k / (g_k.sum(dim=-1, keepdim=True) + 1e-8)
-        
-        # Step C: Element-wise multiplication
-        # continuous_bias = v_t * g_k
-        continuous_bias = v_t * g_k
+        # Step D: Element-wise multiplication with explicit scale factor
+        # α = 1/hidden_size ensures injection scale is controlled regardless of gate values
+        alpha = 1.0 / self.config.hidden_size
+        continuous_bias = alpha * v_t_norm * g_k
         
         return continuous_bias
 

@@ -708,16 +708,18 @@ def LlamaModel_fast_forward(
             # Step A: Extract continuous information via info_head
             v_t = self.info_head(hidden_for_thinking)  # (num_thinking_positions, hidden_dim)
             
-            # Step B: Token-specific gating with sigmoid activation
+            # Step B: RMSNorm on v_t to stabilize scale (direction only, remove unstable magnitude)
+            v_t_rms = torch.sqrt(torch.mean(v_t ** 2, dim=-1, keepdim=True) + 1e-8)
+            v_t_norm = v_t / v_t_rms
+            
+            # Step C: Token-specific gating with sigmoid activation (NO normalization - preserve independence)
             gate_vectors = self.token_gate_matrix(ids_for_thinking)  # (num_thinking_positions, hidden_dim)
-            g_k = torch.sigmoid(gate_vectors)  # Sigmoid allows independent control per dimension
+            g_k = torch.sigmoid(gate_vectors)  # Independent gates, can be all-open, all-closed, or mixed
             
-            # Step B.1: L1 normalize to match softmax constraint (sum = 1)
-            # This ensures the same scale as softmax while preserving sigmoid's independent activation
-            g_k = g_k / (g_k.sum(dim=-1, keepdim=True) + 1e-8)
-            
-            # Step C: Element-wise multiplication to get continuous bias
-            continuous_bias = v_t * g_k  # (num_thinking_positions, hidden_dim)
+            # Step D: Element-wise multiplication with explicit scale factor
+            # α = 1/hidden_size ensures injection scale is controlled regardless of gate values
+            alpha = 1.0 / self.config.hidden_size
+            continuous_bias = alpha * v_t_norm * g_k  # (num_thinking_positions, hidden_dim)
             
             # Step D: Residual injection
             # inputs_embeds = original_token_embeds + continuous_bias
@@ -1015,17 +1017,19 @@ def LlamaModel_fast_forward_inference(
             # v_t = info_head(last_hidden_states)
             v_t = self.model.info_head(last_hidden_states)  # (batch_size, hidden_dim)
             
-            # Step B: Token-specific gating with sigmoid activation
-            # g_k = sigmoid(token_gate_matrix(input_ids)) - sigmoid maps to [0,1] independently per dim
+            # Step B: RMSNorm on v_t to stabilize scale (direction only, remove unstable magnitude)
+            v_t_rms = torch.sqrt(torch.mean(v_t ** 2, dim=-1, keepdim=True) + 1e-8)
+            v_t_norm = v_t / v_t_rms
+            
+            # Step C: Token-specific gating with sigmoid activation (NO normalization - preserve independence)
+            # g_k = sigmoid(token_gate_matrix(input_ids)) - each dim independently decides info flow
             gate_vectors = self.model.token_gate_matrix(input_ids.squeeze(-1))  # (batch_size, hidden_dim)
-            g_k = torch.sigmoid(gate_vectors)  # Sigmoid allows independent control per dimension
+            g_k = torch.sigmoid(gate_vectors)  # Independent gates, can be all-open, all-closed, or mixed
             
-            # Step B.1: L1 normalize to match softmax constraint (sum = 1)
-            # This ensures the same scale as softmax while preserving sigmoid's independent activation
-            g_k = g_k / (g_k.sum(dim=-1, keepdim=True) + 1e-8)
-            
-            # Step C: Element-wise multiplication to get continuous bias
-            continuous_bias = v_t * g_k  # (batch_size, hidden_dim)
+            # Step D: Element-wise multiplication with explicit scale factor
+            # α = 1/hidden_size ensures injection scale is controlled regardless of gate values
+            alpha = 1.0 / self.config.hidden_size
+            continuous_bias = alpha * v_t_norm * g_k  # (batch_size, hidden_dim)
             
             # Step D: Residual injection (only for thinking positions)
             # inputs_embeds = original_token_embeds + continuous_bias
