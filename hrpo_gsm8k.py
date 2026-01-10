@@ -24,7 +24,7 @@ def preprocess_gsm8k(split="train", chunk_size=1000) -> Dataset:
 
 def main(args):
     exp_name = (f"./experiments/{args.model_name.split('/')[-1]}-gsm8k-group{args.group_size}"
-                f"-lora{args.lora_rank}-temp{args.temperature}-tdgr")
+                f"-lora{args.lora_rank}-temp{args.temperature}-110")
     if os.path.exists(exp_name) and len(os.listdir(exp_name)) > 0:
         print(f"Experiment {exp_name} already exists. Exiting...")
         exit()
