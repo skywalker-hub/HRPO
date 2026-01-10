@@ -434,6 +434,23 @@ def grpo_accumulated_loss(
                 thinking_hidden_states_cache = thinking_hidden_states_cache,  # Pass hidden states for info_head
                 thinking_input_ids_cache = input_ids,  # Pass input_ids for token_gate_matrix lookup
             ).logits
+            
+            # ============================================================
+            # 读取 thinking 模块的监控统计值（训练阶段）
+            # ============================================================
+            base_model = trainer.model
+            if hasattr(base_model, 'base_model'):
+                base_model = base_model.base_model
+            if hasattr(base_model, 'model'):
+                base_model = base_model.model
+            if hasattr(base_model, 'model'):
+                base_model = base_model.model
+            
+            if hasattr(base_model, '_thinking_monitor_stats') and base_model._thinking_monitor_stats:
+                if not hasattr(trainer, '_thinking_monitor_stats_cache'):
+                    trainer._thinking_monitor_stats_cache = []
+                trainer._thinking_monitor_stats_cache.append(base_model._thinking_monitor_stats.copy())
+                base_model._thinking_monitor_stats = {}
         else:
             new_hidden_states = trainer.model(input_ids = input_ids, logits_to_keep = logits_to_keep + 1).logits
         

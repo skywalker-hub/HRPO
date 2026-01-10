@@ -571,12 +571,36 @@ class GRPOTrainer(Trainer):
                 
                 # ============================================================
                 # 立即读取 thinking 模块的监控统计值（在 unwrapped_model 还有效时）
+                # 尝试多个可能的位置，因为模型结构可能不同
                 # ============================================================
                 thinking_monitor_stats = {}
-                # unwrapped_model 是 CausalLM，unwrapped_model.model 是底层 Model
-                if hasattr(unwrapped_model, 'model') and hasattr(unwrapped_model.model, '_thinking_monitor_stats'):
-                    thinking_monitor_stats = unwrapped_model.model._thinking_monitor_stats.copy()
-                    unwrapped_model.model._thinking_monitor_stats = {}
+                
+                # 尝试的位置列表（从最可能到最不可能）
+                candidates = []
+                
+                # 位置1: unwrapped_model.model (CausalLM.model = 底层Model)
+                if hasattr(unwrapped_model, 'model'):
+                    candidates.append(unwrapped_model.model)
+                
+                # 位置2: unwrapped_model 本身
+                candidates.append(unwrapped_model)
+                
+                # 位置3: unwrapped_model.model.model (如果有多层包装)
+                if hasattr(unwrapped_model, 'model') and hasattr(unwrapped_model.model, 'model'):
+                    candidates.append(unwrapped_model.model.model)
+                
+                # 尝试从每个候选位置读取
+                for i, candidate in enumerate(candidates):
+                    if hasattr(candidate, '_thinking_monitor_stats') and candidate._thinking_monitor_stats:
+                        thinking_monitor_stats = candidate._thinking_monitor_stats.copy()
+                        candidate._thinking_monitor_stats = {}
+                        break
+                
+                # 调试：如果没找到，打印一次警告
+                if not thinking_monitor_stats and self.state.global_step <= 1:
+                    print(f"[DEBUG] _thinking_monitor_stats not found. Candidates checked: {len(candidates)}")
+                    for i, c in enumerate(candidates):
+                        print(f"  [{i}] {type(c).__name__}: has_attr={hasattr(c, '_thinking_monitor_stats')}")
 
             # Compute prompt length and extract completion ids
             prompt_length = prompt_ids.size(1)
@@ -739,14 +763,32 @@ class GRPOTrainer(Trainer):
         # ============================================================
         # 记录 thinking 模块的监控指标（与其他指标同步）
         # ============================================================
-        thinking_stats = inputs.get("thinking_monitor_stats", {})
-        if thinking_stats:
-            if 'g_k_mean' in thinking_stats:
-                self._metrics["gate/g_k_mean"].append(thinking_stats['g_k_mean'])
-            if 'continuous_bias_norm' in thinking_stats:
-                self._metrics["continuous_bias/norm"].append(thinking_stats['continuous_bias_norm'])
-            if 'gate_vectors_mean' in thinking_stats:
-                self._metrics["gate/raw_mean"].append(thinking_stats['gate_vectors_mean'])
+        # 优先从训练阶段的缓存读取（rl_replacements.py 中设置）
+        if hasattr(self, '_thinking_monitor_stats_cache') and self._thinking_monitor_stats_cache:
+            # 平均所有缓存的统计值
+            g_k_means = [s['g_k_mean'] for s in self._thinking_monitor_stats_cache if 'g_k_mean' in s]
+            bias_norms = [s['continuous_bias_norm'] for s in self._thinking_monitor_stats_cache if 'continuous_bias_norm' in s]
+            gate_means = [s['gate_vectors_mean'] for s in self._thinking_monitor_stats_cache if 'gate_vectors_mean' in s]
+            
+            if g_k_means:
+                self._metrics["gate/g_k_mean"].append(sum(g_k_means) / len(g_k_means))
+            if bias_norms:
+                self._metrics["continuous_bias/norm"].append(sum(bias_norms) / len(bias_norms))
+            if gate_means:
+                self._metrics["gate/raw_mean"].append(sum(gate_means) / len(gate_means))
+            
+            # 清空缓存
+            self._thinking_monitor_stats_cache = []
+        else:
+            # 备选：从 generate 阶段的 inputs 读取
+            thinking_stats = inputs.get("thinking_monitor_stats", {})
+            if thinking_stats:
+                if 'g_k_mean' in thinking_stats:
+                    self._metrics["gate/g_k_mean"].append(thinking_stats['g_k_mean'])
+                if 'continuous_bias_norm' in thinking_stats:
+                    self._metrics["continuous_bias/norm"].append(thinking_stats['continuous_bias_norm'])
+                if 'gate_vectors_mean' in thinking_stats:
+                    self._metrics["gate/raw_mean"].append(thinking_stats['gate_vectors_mean'])
 
         return loss
 
