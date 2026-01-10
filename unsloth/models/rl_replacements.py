@@ -521,7 +521,11 @@ def grpo_trainer_compute_loss(function_name, function):
         continuous_bias_norm = 0.0
         continuous_bias_norm_is_proxy = 0.0
         try:
-            has_thinking = (thinking_mask is not None) and bool(thinking_mask.any().item())
+            thinking_mask_bool = None
+            if thinking_mask is not None:
+                # Be robust: generation may return int/float masks; indexing requires bool.
+                thinking_mask_bool = thinking_mask.to(torch.bool)
+            has_thinking = (thinking_mask_bool is not None) and bool(thinking_mask_bool.any().item())
 
             # (A) continuous_bias/norm from thinking_embeds directly (robust; no dependency on internal module paths)
             if has_thinking and thinking_embeds is not None:
@@ -529,12 +533,12 @@ def grpo_trainer_compute_loss(function_name, function):
                 # - thinking_embeds: (B, T, H), thinking_mask: (B, T)
                 # - thinking_embeds: (N, H),     thinking_mask: (N,)
                 if thinking_embeds.dim() == 3 and thinking_mask.dim() == 2:
-                    bias = thinking_embeds[thinking_mask]
+                    bias = thinking_embeds[thinking_mask_bool]
                 elif thinking_embeds.dim() == 2 and thinking_mask.dim() == 1:
-                    bias = thinking_embeds[thinking_mask]
+                    bias = thinking_embeds[thinking_mask_bool]
                 elif thinking_embeds.dim() == 2 and thinking_mask.dim() == 2:
                     # Some implementations only return per-example bias; fall back to examples that have any thinking.
-                    bias = thinking_embeds[thinking_mask.any(dim=1)]
+                    bias = thinking_embeds[thinking_mask_bool.any(dim=1)]
                 else:
                     bias = None
 
@@ -543,7 +547,7 @@ def grpo_trainer_compute_loss(function_name, function):
 
             # (B) gate/g_k_mean: use token_gate_matrix weight directly (works with PEFT ModulesToSaveWrapper too)
             if has_thinking:
-                ids_for_thinking = _input_ids[thinking_mask]  # (num_thinking_positions,)
+                ids_for_thinking = _input_ids[thinking_mask_bool]  # (num_thinking_positions,)
 
                 # Prefer trainer's model (may differ from `model` arg due to wrappers).
                 root = getattr(self, "model", model)
