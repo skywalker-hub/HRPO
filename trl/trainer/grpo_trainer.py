@@ -558,6 +558,7 @@ class GRPOTrainer(Trainer):
             completion_ids = [torch.tensor(ids, device=device) for ids in completion_ids]
             completion_ids = pad(completion_ids, padding_value=self.processing_class.pad_token_id)
             prompt_completion_ids = torch.cat([prompt_ids, completion_ids], dim=1)
+            thinking_monitor_stats = {}  # vLLM 模式不支持 thinking 监控
         else:
             # Regular generation path
             with unwrap_model_for_generation(self.model, self.accelerator) as unwrapped_model:
@@ -567,6 +568,15 @@ class GRPOTrainer(Trainer):
                     processing_class=self.processing_class,
                     return_thinking_embeds=True,
                 )
+                
+                # ============================================================
+                # 立即读取 thinking 模块的监控统计值（在 unwrapped_model 还有效时）
+                # ============================================================
+                thinking_monitor_stats = {}
+                # unwrapped_model 是 CausalLM，unwrapped_model.model 是底层 Model
+                if hasattr(unwrapped_model, 'model') and hasattr(unwrapped_model.model, '_thinking_monitor_stats'):
+                    thinking_monitor_stats = unwrapped_model.model._thinking_monitor_stats.copy()
+                    unwrapped_model.model._thinking_monitor_stats = {}
 
             # Compute prompt length and extract completion ids
             prompt_length = prompt_ids.size(1)
@@ -663,22 +673,6 @@ class GRPOTrainer(Trainer):
 
         self._metrics["reward"].append(rewards.mean().item())
         self._metrics["reward_std"].append(std_grouped_rewards.mean().item())
-        
-        # ============================================================
-        # 读取 thinking 模块的监控统计值，传递给 compute_loss
-        # ============================================================
-        thinking_monitor_stats = {}
-        base_model = self.model
-        if hasattr(base_model, 'base_model'):
-            base_model = base_model.base_model
-        if hasattr(base_model, 'model'):
-            base_model = base_model.model
-        if hasattr(base_model, 'model'):
-            base_model = base_model.model
-        
-        if hasattr(base_model, '_thinking_monitor_stats'):
-            thinking_monitor_stats = base_model._thinking_monitor_stats.copy()
-            base_model._thinking_monitor_stats = {}
 
         if (
             self.log_completions
