@@ -519,6 +519,7 @@ def grpo_trainer_compute_loss(function_name, function):
         # - continuous_bias/norm: average per-position L2 norm of thinking_embeds (continuous_bias)
         gate_g_k_mean = 0.0
         continuous_bias_norm = 0.0
+        continuous_bias_norm_is_proxy = 0.0
         try:
             has_thinking = (thinking_mask is not None) and bool(thinking_mask.any().item())
 
@@ -531,54 +532,50 @@ def grpo_trainer_compute_loss(function_name, function):
                     bias = thinking_embeds[thinking_mask]
                 elif thinking_embeds.dim() == 2 and thinking_mask.dim() == 1:
                     bias = thinking_embeds[thinking_mask]
+                elif thinking_embeds.dim() == 2 and thinking_mask.dim() == 2:
+                    # Some implementations only return per-example bias; fall back to examples that have any thinking.
+                    bias = thinking_embeds[thinking_mask.any(dim=1)]
                 else:
                     bias = None
 
                 if bias is not None and bias.numel() > 0:
                     continuous_bias_norm = bias.detach().float().norm(dim=-1).mean().item()
 
-            # (B) gate/g_k_mean: cache token_gate_matrix module once, then compute on thinking positions
-            if not hasattr(self, "_tdgr_token_gate_matrix_module"):
-                tdgr_gate = None
+            # (B) gate/g_k_mean: use token_gate_matrix weight directly (works with PEFT ModulesToSaveWrapper too)
+            if has_thinking:
+                ids_for_thinking = _input_ids[thinking_mask]  # (num_thinking_positions,)
+
                 # Prefer trainer's model (may differ from `model` arg due to wrappers).
                 root = getattr(self, "model", model)
                 if hasattr(root, "module"):
                     root = root.module
 
-                # Fast path: look up by module name
-                try:
-                    for name, mod in root.named_modules():
-                        if name.endswith("token_gate_matrix"):
-                            tdgr_gate = mod
-                            break
-                except Exception:
-                    tdgr_gate = None
+                token_gate_weight = None
+                for n, p in root.named_parameters():
+                    # Typical names:
+                    # - "...token_gate_matrix.weight"
+                    # - "...token_gate_matrix.modules_to_save.default.weight"
+                    if ("token_gate_matrix" in n) and n.endswith("weight"):
+                        token_gate_weight = p
+                        break
 
-                # Fallback: attribute walking
-                if tdgr_gate is None:
-                    candidates = [root]
-                    if hasattr(root, "model"): candidates.append(root.model)
-                    if hasattr(root, "base_model"): candidates.append(root.base_model)
-                    for cand in candidates:
-                        if cand is None: continue
-                        if hasattr(cand, "model"): candidates.append(cand.model)
-                    for cand in candidates:
-                        if cand is None: continue
-                        if hasattr(cand, "token_gate_matrix"):
-                            tdgr_gate = getattr(cand, "token_gate_matrix")
-                            break
-
-                setattr(self, "_tdgr_token_gate_matrix_module", tdgr_gate)
-
-            if has_thinking:
-                tdgr_gate = getattr(self, "_tdgr_token_gate_matrix_module", None)
-                if tdgr_gate is not None:
-                    ids_for_thinking = _input_ids[thinking_mask]  # (num_thinking_positions,)
-                    gate_vectors = tdgr_gate(ids_for_thinking)
+                if token_gate_weight is not None and ids_for_thinking.numel() > 0:
+                    gate_vectors = token_gate_weight.index_select(0, ids_for_thinking.view(-1))
                     gate_g_k_mean = torch.sigmoid(gate_vectors).detach().float().mean().item()
+
+                    # Fallback proxy if we couldn't compute continuous_bias from thinking_embeds:
+                    # continuous_bias = (1/H) * v_t_norm * g_k, with RMS(v_t_norm)=1.
+                    # So ||continuous_bias|| ≈ (1/H) * sqrt(sum(g_k^2)).
+                    if continuous_bias_norm == 0.0:
+                        hd = gate_vectors.shape[-1]
+                        g_k = torch.sigmoid(gate_vectors).detach().float()
+                        proxy = (g_k.pow(2).sum(dim=-1).sqrt() / float(hd)).mean().item()
+                        continuous_bias_norm = proxy
+                        continuous_bias_norm_is_proxy = 1.0
         except Exception:
             gate_g_k_mean = 0.0
             continuous_bias_norm = 0.0
+            continuous_bias_norm_is_proxy = 0.0
         
         if "train" in self._metrics:
             mode = "eval" if self.control.should_evaluate else "train"
@@ -587,12 +584,14 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics[mode]["kl"].append(mean_kl.item())
             self._metrics[mode]["gate/g_k_mean"].append(gate_g_k_mean)
             self._metrics[mode]["continuous_bias/norm"].append(continuous_bias_norm)
+            self._metrics[mode]["continuous_bias/norm_is_proxy"].append(continuous_bias_norm_is_proxy)
         else:
             self._metrics["thinking_ratio"].append(thinking_ratio.item())
             self._metrics["completion_length"].append(completion_length.item())
             self._metrics["kl"].append(mean_kl.item())
             self._metrics["gate/g_k_mean"].append(gate_g_k_mean)
             self._metrics["continuous_bias/norm"].append(continuous_bias_norm)
+            self._metrics["continuous_bias/norm_is_proxy"].append(continuous_bias_norm_is_proxy)
         return loss
     pass
 
