@@ -18,6 +18,9 @@ class TDGRMetricsCallback(TrainerCallback):
         super().__init__()
         self._last_info_head_grad_norm: Optional[float] = None
         self._last_gate_grad_norm: Optional[float] = None
+        # Fixed sampling indices for cheap "mean trend" logging
+        self._info_head_sample_idx: Optional[torch.Tensor] = None
+        self._token_gate_row_idx: Optional[torch.Tensor] = None
 
     @staticmethod
     def _grad_l2_norm(model, name_substr: str) -> float:
@@ -34,6 +37,66 @@ class TDGRMetricsCallback(TrainerCallback):
             total_sq += g.pow(2).sum().item()
         return math.sqrt(total_sq) if total_sq > 0.0 else 0.0
 
+    @staticmethod
+    def _unwrap_model(model):
+        # Handle DDP/accelerate wrappers
+        if hasattr(model, "module"):
+            return model.module
+        return model
+
+    @staticmethod
+    def _find_param(model, name_substr: str):
+        """
+        Return (name, param) for the first parameter whose name contains name_substr and ends with 'weight'.
+        Works for PEFT modules_to_save wrappers too.
+        """
+        for n, p in model.named_parameters():
+            if name_substr in n and n.endswith("weight"):
+                return n, p
+        return None, None
+
+    def _sampled_mean(self, w: torch.Tensor, max_elems: int, cached_idx_attr: str) -> float:
+        """
+        Cheap mean over a fixed subset of elements (trend-friendly).
+        """
+        with torch.no_grad():
+            w_flat = w.detach()
+            if w_flat.is_floating_point():
+                w_flat = w_flat.float()
+            w_flat = w_flat.reshape(-1)
+            n = w_flat.numel()
+            if n == 0:
+                return 0.0
+            k = min(int(max_elems), int(n))
+            idx = getattr(self, cached_idx_attr)
+            if idx is None or idx.numel() != k or idx.device != w_flat.device:
+                idx = torch.randint(0, n, (k,), device=w_flat.device)
+                setattr(self, cached_idx_attr, idx)
+            return w_flat.index_select(0, idx).mean().item()
+
+    def _sampled_sigmoid_mean_token_gate(self, w: torch.Tensor, max_rows: int) -> float:
+        """
+        Cheap mean(sigmoid(token_gate_matrix)) over fixed sampled vocab rows.
+        This avoids reducing over the full vocab_size*hidden_size every step.
+        """
+        with torch.no_grad():
+            ww = w.detach()
+            if ww.is_floating_point():
+                ww = ww.float()
+            if ww.dim() != 2:
+                # Unexpected shape
+                return torch.sigmoid(ww).mean().item()
+            vocab = ww.shape[0]
+            if vocab == 0:
+                return 0.0
+            k = min(int(max_rows), int(vocab))
+            idx = self._token_gate_row_idx
+            if idx is None or idx.numel() != k or idx.device != ww.device:
+                idx = torch.randint(0, vocab, (k,), device=ww.device)
+                self._token_gate_row_idx = idx
+            sample = ww.index_select(0, idx)  # (k, hidden)
+            return torch.sigmoid(sample).mean().item()
+
     def on_pre_optimizer_step(self, args, state, control, model=None, **kwargs):
         if model is None:
             return
@@ -49,6 +112,25 @@ class TDGRMetricsCallback(TrainerCallback):
             logs["info_head/grad_norm"] = float(self._last_info_head_grad_norm)
         if self._last_gate_grad_norm is not None:
             logs["gate/grad_norm"] = float(self._last_gate_grad_norm)
+
+        # "Simple means" requested: track mean trends of the 2 matrices.
+        if model is None:
+            return
+        m = self._unwrap_model(model)
+
+        # info_head weight mean (sampled)
+        _, info_w = self._find_param(m, "info_head")
+        if info_w is not None:
+            logs["info_head/weight_mean"] = float(self._sampled_mean(info_w, max_elems=200_000, cached_idx_attr="_info_head_sample_idx"))
+
+        # token_gate_matrix weight mean (sampled) + gate/g_k_mean as sigmoid(weight) mean (sampled rows)
+        _, gate_w = self._find_param(m, "token_gate_matrix")
+        if gate_w is not None:
+            logs["token_gate_matrix/weight_mean"] = float(
+                self._sampled_mean(gate_w, max_elems=200_000, cached_idx_attr="_token_gate_row_idx")
+            )
+            # Override the previous gate/g_k_mean (which was trying to be per-thinking-token) with a simple global trend.
+            logs["gate/g_k_mean"] = float(self._sampled_sigmoid_mean_token_gate(gate_w, max_rows=2048))
 
 
 def ensure_tdgr_metrics_callback(trainer) -> None:

@@ -520,66 +520,106 @@ def grpo_trainer_compute_loss(function_name, function):
         gate_g_k_mean = 0.0
         continuous_bias_norm = 0.0
         continuous_bias_norm_is_proxy = 0.0
-        try:
-            thinking_mask_bool = None
-            if thinking_mask is not None:
-                # Be robust: generation may return int/float masks; indexing requires bool.
-                thinking_mask_bool = thinking_mask.to(torch.bool)
-            has_thinking = (thinking_mask_bool is not None) and bool(thinking_mask_bool.any().item())
+        thinking_mask_bool = None
+        has_thinking = False
+        n_thinking = 0
+        tdgr_debug = {}
 
-            # (A) continuous_bias/norm from thinking_embeds directly (robust; no dependency on internal module paths)
-            if has_thinking and thinking_embeds is not None:
-                # Common shapes:
-                # - thinking_embeds: (B, T, H), thinking_mask: (B, T)
-                # - thinking_embeds: (N, H),     thinking_mask: (N,)
-                if thinking_embeds.dim() == 3 and thinking_mask.dim() == 2:
+        # 1) thinking_mask sanity
+        if isinstance(thinking_mask, torch.Tensor):
+            thinking_mask_bool = thinking_mask.to(torch.bool)
+            has_thinking = bool(thinking_mask_bool.any().item())
+            n_thinking = int(thinking_mask_bool.sum().item())
+            tdgr_debug["thinking_mask_dim"] = int(thinking_mask.dim())
+            tdgr_debug["thinking_mask_numel"] = int(thinking_mask.numel())
+            tdgr_debug["thinking_mask_sum"] = float(thinking_mask_bool.sum().item())
+        else:
+            tdgr_debug["thinking_mask_not_tensor"] = 1.0
+
+        # 2) continuous_bias/norm from thinking_embeds (best-effort)
+        if has_thinking and isinstance(thinking_embeds, torch.Tensor):
+            tdgr_debug["thinking_embeds_dim"] = int(thinking_embeds.dim())
+            tdgr_debug["thinking_embeds_numel"] = int(thinking_embeds.numel())
+            bias = None
+            try:
+                if thinking_embeds.dim() == 3 and thinking_mask_bool.dim() == 2:
                     bias = thinking_embeds[thinking_mask_bool]
-                elif thinking_embeds.dim() == 2 and thinking_mask.dim() == 1:
+                elif thinking_embeds.dim() == 2 and thinking_mask_bool.dim() == 1:
                     bias = thinking_embeds[thinking_mask_bool]
-                elif thinking_embeds.dim() == 2 and thinking_mask.dim() == 2:
-                    # Some implementations only return per-example bias; fall back to examples that have any thinking.
+                elif thinking_embeds.dim() == 2 and thinking_mask_bool.dim() == 2:
                     bias = thinking_embeds[thinking_mask_bool.any(dim=1)]
-                else:
-                    bias = None
+            except Exception:
+                bias = None
 
-                if bias is not None and bias.numel() > 0:
-                    continuous_bias_norm = bias.detach().float().norm(dim=-1).mean().item()
+            if bias is not None and bias.numel() > 0:
+                continuous_bias_norm = bias.detach().float().norm(dim=-1).mean().item()
+        elif has_thinking and (thinking_embeds is not None) and (not isinstance(thinking_embeds, torch.Tensor)):
+            tdgr_debug["thinking_embeds_not_tensor"] = 1.0
 
-            # (B) gate/g_k_mean: use token_gate_matrix weight directly (works with PEFT ModulesToSaveWrapper too)
-            if has_thinking:
-                ids_for_thinking = _input_ids[thinking_mask_bool]  # (num_thinking_positions,)
+        # 3) gate/g_k_mean from token_gate_matrix weight (best-effort)
+        token_gate_weight = None
+        token_gate_weight_name = None
+        if has_thinking:
+            try:
+                ids_for_thinking = _input_ids[thinking_mask_bool].view(-1)
+            except Exception:
+                ids_for_thinking = None
 
-                # Prefer trainer's model (may differ from `model` arg due to wrappers).
-                root = getattr(self, "model", model)
-                if hasattr(root, "module"):
-                    root = root.module
+            root = getattr(self, "model", model)
+            if hasattr(root, "module"):
+                root = root.module
 
-                token_gate_weight = None
+            try:
                 for n, p in root.named_parameters():
-                    # Typical names:
-                    # - "...token_gate_matrix.weight"
-                    # - "...token_gate_matrix.modules_to_save.default.weight"
                     if ("token_gate_matrix" in n) and n.endswith("weight"):
                         token_gate_weight = p
+                        token_gate_weight_name = n
                         break
+            except Exception:
+                token_gate_weight = None
+                token_gate_weight_name = None
 
-                if token_gate_weight is not None and ids_for_thinking.numel() > 0:
-                    gate_vectors = token_gate_weight.index_select(0, ids_for_thinking.view(-1))
+            if token_gate_weight is not None and ids_for_thinking is not None and ids_for_thinking.numel() > 0:
+                try:
+                    gate_vectors = token_gate_weight.index_select(0, ids_for_thinking)
                     gate_g_k_mean = torch.sigmoid(gate_vectors).detach().float().mean().item()
+                    tdgr_debug["token_gate_found"] = 1.0
+                except Exception:
+                    tdgr_debug["token_gate_index_failed"] = 1.0
+            else:
+                tdgr_debug["token_gate_found"] = 0.0
 
-                    # Fallback proxy if we couldn't compute continuous_bias from thinking_embeds:
-                    # continuous_bias = (1/H) * v_t_norm * g_k, with RMS(v_t_norm)=1.
-                    # So ||continuous_bias|| ≈ (1/H) * sqrt(sum(g_k^2)).
-                    if continuous_bias_norm == 0.0:
-                        hd = gate_vectors.shape[-1]
-                        g_k = torch.sigmoid(gate_vectors).detach().float()
-                        proxy = (g_k.pow(2).sum(dim=-1).sqrt() / float(hd)).mean().item()
-                        continuous_bias_norm = proxy
-                        continuous_bias_norm_is_proxy = 1.0
-        except Exception:
-            gate_g_k_mean = 0.0
-            continuous_bias_norm = 0.0
-            continuous_bias_norm_is_proxy = 0.0
+            # 4) fallback proxy if we still don't have bias norm but have gate vectors
+            if continuous_bias_norm == 0.0 and token_gate_weight is not None and ids_for_thinking is not None and ids_for_thinking.numel() > 0:
+                try:
+                    gate_vectors = token_gate_weight.index_select(0, ids_for_thinking)
+                    hd = gate_vectors.shape[-1]
+                    g_k = torch.sigmoid(gate_vectors).detach().float()
+                    proxy = (g_k.pow(2).sum(dim=-1).sqrt() / float(hd)).mean().item()
+                    continuous_bias_norm = proxy
+                    continuous_bias_norm_is_proxy = 1.0
+                except Exception:
+                    pass
+
+        # 5) print one-time debug if still zeros despite thinking
+        if has_thinking and (gate_g_k_mean == 0.0) and (continuous_bias_norm == 0.0) and (not hasattr(self, "_tdgr_debug_printed")):
+            try:
+                is_main = True
+                if hasattr(self, "accelerator"):
+                    is_main = bool(getattr(self.accelerator, "is_main_process", True))
+                if is_main:
+                    print("\n[TDGR DEBUG] metrics are 0 despite thinking_ratio>0")
+                    print(f"[TDGR DEBUG] thinking_mask: type={type(thinking_mask)}, dim={getattr(thinking_mask, 'dim', lambda: 'NA')()}, sum={n_thinking}")
+                    print(f"[TDGR DEBUG] thinking_embeds: type={type(thinking_embeds)}, shape={getattr(thinking_embeds, 'shape', None)}")
+                    print(f"[TDGR DEBUG] token_gate_weight_found={token_gate_weight is not None}, name={token_gate_weight_name}")
+                    if token_gate_weight is not None:
+                        w = token_gate_weight.detach()
+                        print(f"[TDGR DEBUG] token_gate_weight stats: mean={w.float().mean().item():.6f}, min={w.float().min().item():.6f}, max={w.float().max().item():.6f}")
+                    print(f"[TDGR DEBUG] aux: {tdgr_debug}")
+                    print("[TDGR DEBUG] end\n")
+                setattr(self, "_tdgr_debug_printed", True)
+            except Exception:
+                setattr(self, "_tdgr_debug_printed", True)
         
         if "train" in self._metrics:
             mode = "eval" if self.control.should_evaluate else "train"
