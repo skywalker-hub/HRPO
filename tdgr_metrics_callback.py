@@ -20,6 +20,7 @@ class TDGRMetricsCallback(TrainerCallback):
         self._last_gate_grad_norm: Optional[float] = None
         # Fixed sampling indices for cheap "mean trend" logging
         self._info_head_sample_idx: Optional[torch.Tensor] = None
+        self._token_gate_flat_idx: Optional[torch.Tensor] = None
         self._token_gate_row_idx: Optional[torch.Tensor] = None
 
     @staticmethod
@@ -45,14 +46,24 @@ class TDGRMetricsCallback(TrainerCallback):
         return model
 
     @staticmethod
-    def _find_param(model, name_substr: str):
+    def _find_param_best(model, name_substr: str, prefer_substrings: Optional[list[str]] = None):
         """
-        Return (name, param) for the first parameter whose name contains name_substr and ends with 'weight'.
-        Works for PEFT modules_to_save wrappers too.
+        Return (name, param) for a parameter whose name contains name_substr and ends with 'weight'.
+        If prefer_substrings is provided, pick the first match that contains any preferred substring (in order),
+        otherwise fall back to the first match.
         """
+        candidates = []
         for n, p in model.named_parameters():
             if name_substr in n and n.endswith("weight"):
-                return n, p
+                candidates.append((n, p))
+        if not candidates:
+            return None, None
+        if prefer_substrings:
+            for pref in prefer_substrings:
+                for n, p in candidates:
+                    if pref in n:
+                        return n, p
+        return candidates[0]
         return None, None
 
     def _sampled_mean(self, w: torch.Tensor, max_elems: int, cached_idx_attr: str) -> float:
@@ -119,18 +130,48 @@ class TDGRMetricsCallback(TrainerCallback):
         m = self._unwrap_model(model)
 
         # info_head weight mean (sampled)
-        _, info_w = self._find_param(m, "info_head")
+        _, info_w = self._find_param_best(
+            m,
+            "info_head",
+            prefer_substrings=["modules_to_save.default.weight", "modules_to_save.default"],
+        )
         if info_w is not None:
             logs["info_head/weight_mean"] = float(self._sampled_mean(info_w, max_elems=200_000, cached_idx_attr="_info_head_sample_idx"))
 
         # token_gate_matrix weight mean (sampled) + gate/g_k_mean as sigmoid(weight) mean (sampled rows)
-        _, gate_w = self._find_param(m, "token_gate_matrix")
+        _, gate_w = self._find_param_best(
+            m,
+            "token_gate_matrix",
+            prefer_substrings=["modules_to_save.default.weight", "modules_to_save.default"],
+        )
         if gate_w is not None:
             logs["token_gate_matrix/weight_mean"] = float(
-                self._sampled_mean(gate_w, max_elems=200_000, cached_idx_attr="_token_gate_row_idx")
+                self._sampled_mean(gate_w, max_elems=200_000, cached_idx_attr="_token_gate_flat_idx")
             )
             # Override the previous gate/g_k_mean (which was trying to be per-thinking-token) with a simple global trend.
             logs["gate/g_k_mean"] = float(self._sampled_sigmoid_mean_token_gate(gate_w, max_rows=2048))
+            # Provide a stable proxy for continuous_bias norm trend (avoids dependence on thinking_embeds plumbing).
+            # If v_t_norm has RMS=1, then ||(1/H)*v_t_norm*g_k|| ≈ (1/H)*sqrt(sum(g_k^2)).
+            try:
+                with torch.no_grad():
+                    ww = gate_w.detach()
+                    if ww.is_floating_point():
+                        ww = ww.float()
+                    if ww.dim() == 2 and ww.shape[0] > 0:
+                        vocab = ww.shape[0]
+                        k = min(2048, vocab)
+                        idx = self._token_gate_row_idx
+                        if idx is None or idx.numel() != k or idx.device != ww.device:
+                            idx = torch.randint(0, vocab, (k,), device=ww.device)
+                            self._token_gate_row_idx = idx
+                        sample = ww.index_select(0, idx)
+                        gk = torch.sigmoid(sample)
+                        hd = sample.shape[-1]
+                        proxy = (gk.pow(2).sum(dim=-1).sqrt() / float(hd)).mean().item()
+                        logs["continuous_bias/norm"] = float(proxy)
+                        logs["continuous_bias/norm_is_proxy"] = 1.0
+            except Exception:
+                pass
 
 
 def ensure_tdgr_metrics_callback(trainer) -> None:
