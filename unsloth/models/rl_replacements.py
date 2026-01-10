@@ -516,24 +516,66 @@ def grpo_trainer_compute_loss(function_name, function):
 
         # TDGR metrics:
         # - gate/g_k_mean: mean(sigmoid(token_gate_matrix(ids))) over thinking positions
-        # - continuous_bias/norm: average per-position L2 norm (cached from dynamic recompute forward if available)
+        # - continuous_bias/norm: average per-position L2 norm of thinking_embeds (continuous_bias)
         gate_g_k_mean = 0.0
         continuous_bias_norm = 0.0
         try:
-            # Locate the core (decoder) module where info_head/token_gate_matrix live.
-            core = model
-            if hasattr(core, "model"): core = core.model
-            if hasattr(core, "model"): core = core.model
+            has_thinking = (thinking_mask is not None) and bool(thinking_mask.any().item())
 
-            if thinking_mask is not None and thinking_mask.any() and hasattr(core, "token_gate_matrix"):
-                ids_for_thinking = _input_ids[thinking_mask]  # (num_thinking_positions,)
-                gate_vectors = core.token_gate_matrix(ids_for_thinking)
-                g_k = torch.sigmoid(gate_vectors)
-                gate_g_k_mean = g_k.detach().float().mean().item()
+            # (A) continuous_bias/norm from thinking_embeds directly (robust; no dependency on internal module paths)
+            if has_thinking and thinking_embeds is not None:
+                # Common shapes:
+                # - thinking_embeds: (B, T, H), thinking_mask: (B, T)
+                # - thinking_embeds: (N, H),     thinking_mask: (N,)
+                if thinking_embeds.dim() == 3 and thinking_mask.dim() == 2:
+                    bias = thinking_embeds[thinking_mask]
+                elif thinking_embeds.dim() == 2 and thinking_mask.dim() == 1:
+                    bias = thinking_embeds[thinking_mask]
+                else:
+                    bias = None
 
-            # Prefer the forward-cached value from dynamic recomputation (more faithful to training path).
-            if hasattr(core, "_tdgr_last_continuous_bias_norm"):
-                continuous_bias_norm = float(getattr(core, "_tdgr_last_continuous_bias_norm"))
+                if bias is not None and bias.numel() > 0:
+                    continuous_bias_norm = bias.detach().float().norm(dim=-1).mean().item()
+
+            # (B) gate/g_k_mean: cache token_gate_matrix module once, then compute on thinking positions
+            if not hasattr(self, "_tdgr_token_gate_matrix_module"):
+                tdgr_gate = None
+                # Prefer trainer's model (may differ from `model` arg due to wrappers).
+                root = getattr(self, "model", model)
+                if hasattr(root, "module"):
+                    root = root.module
+
+                # Fast path: look up by module name
+                try:
+                    for name, mod in root.named_modules():
+                        if name.endswith("token_gate_matrix"):
+                            tdgr_gate = mod
+                            break
+                except Exception:
+                    tdgr_gate = None
+
+                # Fallback: attribute walking
+                if tdgr_gate is None:
+                    candidates = [root]
+                    if hasattr(root, "model"): candidates.append(root.model)
+                    if hasattr(root, "base_model"): candidates.append(root.base_model)
+                    for cand in candidates:
+                        if cand is None: continue
+                        if hasattr(cand, "model"): candidates.append(cand.model)
+                    for cand in candidates:
+                        if cand is None: continue
+                        if hasattr(cand, "token_gate_matrix"):
+                            tdgr_gate = getattr(cand, "token_gate_matrix")
+                            break
+
+                setattr(self, "_tdgr_token_gate_matrix_module", tdgr_gate)
+
+            if has_thinking:
+                tdgr_gate = getattr(self, "_tdgr_token_gate_matrix_module", None)
+                if tdgr_gate is not None:
+                    ids_for_thinking = _input_ids[thinking_mask]  # (num_thinking_positions,)
+                    gate_vectors = tdgr_gate(ids_for_thinking)
+                    gate_g_k_mean = torch.sigmoid(gate_vectors).detach().float().mean().item()
         except Exception:
             gate_g_k_mean = 0.0
             continuous_bias_norm = 0.0
