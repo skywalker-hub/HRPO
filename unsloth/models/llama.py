@@ -721,6 +721,16 @@ def LlamaModel_fast_forward(
             alpha = 1.0 / self.config.hidden_size
             continuous_bias = alpha * v_t_norm * g_k  # (num_thinking_positions, hidden_dim)
             
+            # ============================================================
+            # 监控: 存储关键统计值用于 W&B 记录
+            # ============================================================
+            # 使用 detach() 避免影响计算图
+            self._thinking_monitor_stats = {
+                'g_k_mean': g_k.detach().mean().item(),  # 门控值均值（sigmoid后）
+                'continuous_bias_norm': continuous_bias.detach().norm().item(),  # 偏置的 L2 范数
+                'gate_vectors_mean': gate_vectors.detach().mean().item(),  # 门控向量原始值均值（sigmoid前）
+            }
+            
             # Step D: Residual injection
             # inputs_embeds = original_token_embeds + continuous_bias
             new_inputs_embeds[thinking_mask] = (inputs_embeds[thinking_mask] + continuous_bias).to(inputs_embeds.dtype)
@@ -1030,6 +1040,15 @@ def LlamaModel_fast_forward_inference(
             # α = 1/hidden_size ensures injection scale is controlled regardless of gate values
             alpha = 1.0 / self.config.hidden_size
             continuous_bias = alpha * v_t_norm * g_k  # (batch_size, hidden_dim)
+            
+            # ============================================================
+            # 监控: 存储关键统计值用于 W&B 记录（推理/generate模式）
+            # ============================================================
+            self.model._thinking_monitor_stats = {
+                'g_k_mean': g_k.detach().mean().item(),
+                'continuous_bias_norm': continuous_bias.detach().norm().item(),
+                'gate_vectors_mean': gate_vectors.detach().mean().item(),
+            }
             
             # Step D: Residual injection (only for thinking positions)
             # inputs_embeds = original_token_embeds + continuous_bias

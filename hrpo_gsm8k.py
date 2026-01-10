@@ -10,7 +10,7 @@ import os
 import argparse
 from trl import GRPOConfig, GRPOTrainer
 from datasets import load_dataset, Dataset
-from patch import patch_trainer_optimizer
+from patch import patch_trainer_optimizer, ThinkingModulesMonitorCallback
 from utils import *
 
 os.environ["WANDB_PROJECT"] = "latent-reasoning"
@@ -131,6 +131,10 @@ def main(args):
     )
 
     dataset = preprocess_gsm8k('train', chunk_size=500)
+    
+    # 创建监控回调
+    thinking_monitor = ThinkingModulesMonitorCallback()
+    
     trainer = GRPOTrainer(
         model = model,
         processing_class = tokenizer,
@@ -139,6 +143,7 @@ def main(args):
         ],
         args = training_args,
         train_dataset = dataset,
+        callbacks = [thinking_monitor],  # 添加监控回调
     )
     patch_trainer_optimizer(
         trainer,
