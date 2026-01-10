@@ -663,6 +663,30 @@ class GRPOTrainer(Trainer):
 
         self._metrics["reward"].append(rewards.mean().item())
         self._metrics["reward_std"].append(std_grouped_rewards.mean().item())
+        
+        # ============================================================
+        # 记录 thinking 模块的监控指标
+        # ============================================================
+        # 获取基础模型（穿透 PEFT 包装）
+        base_model = self.model
+        if hasattr(base_model, 'base_model'):
+            base_model = base_model.base_model
+        if hasattr(base_model, 'model'):
+            base_model = base_model.model
+        if hasattr(base_model, 'model'):
+            base_model = base_model.model
+        
+        # 读取 generate 阶段存储的统计值
+        if hasattr(base_model, '_thinking_monitor_stats'):
+            stats = base_model._thinking_monitor_stats
+            if 'g_k_mean' in stats:
+                self._metrics["gate/g_k_mean"].append(stats['g_k_mean'])
+            if 'continuous_bias_norm' in stats:
+                self._metrics["continuous_bias/norm"].append(stats['continuous_bias_norm'])
+            if 'gate_vectors_mean' in stats:
+                self._metrics["gate/raw_mean"].append(stats['gate_vectors_mean'])
+            # 清空统计值
+            base_model._thinking_monitor_stats = {}
 
         if (
             self.log_completions
