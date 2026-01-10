@@ -145,6 +145,10 @@ def main(args):
         train_dataset = dataset,
         callbacks = [thinking_monitor],  # 添加监控回调
     )
+    
+    # 设置 trainer 引用给回调（用于存储梯度范数）
+    thinking_monitor.set_trainer(trainer)
+    
     patch_trainer_optimizer(
         trainer,
         args.lr_info_head,

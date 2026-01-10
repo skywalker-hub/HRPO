@@ -9,16 +9,14 @@ class ThinkingModulesMonitorCallback(TrainerCallback):
     Callback to monitor gradient norms of info_head and token_gate_matrix modules.
     
     Uses backward hooks to capture gradients before they are cleared by zero_grad().
+    Stores gradient norms on the trainer object for GRPOTrainer.log() to pick up.
     """
     
     def __init__(self):
-        self._grad_stats = {
-            'info_head/grad_norm': [],
-            'gate/grad_norm': [],
-        }
         self._hooks = []
         self._current_info_head_grad_sq = 0.0
         self._current_gate_grad_sq = 0.0
+        self._trainer = None
     
     def _make_hook(self, module_type):
         """Create a hook function for the given module type."""
@@ -46,36 +44,43 @@ class ThinkingModulesMonitorCallback(TrainerCallback):
                     self._hooks.append(hook)
     
     def on_step_end(self, args, state, control, **kwargs):
-        """Collect gradient norms after backward (hooks already captured them)."""
-        # Record the accumulated gradient norms
-        if self._current_info_head_grad_sq > 0:
-            self._grad_stats['info_head/grad_norm'].append(self._current_info_head_grad_sq ** 0.5)
-        if self._current_gate_grad_sq > 0:
-            self._grad_stats['gate/grad_norm'].append(self._current_gate_grad_sq ** 0.5)
+        """Collect gradient norms after backward and store on trainer."""
+        # Get trainer reference
+        trainer = kwargs.get('trainer')
+        if trainer is None and self._trainer is not None:
+            trainer = self._trainer
+        
+        if trainer is not None:
+            # Initialize storage on trainer if needed
+            if not hasattr(trainer, '_thinking_grad_norms'):
+                trainer._thinking_grad_norms = {
+                    'info_head/grad_norm': [],
+                    'gate/grad_norm': [],
+                }
+            
+            # Record the accumulated gradient norms
+            if self._current_info_head_grad_sq > 0:
+                trainer._thinking_grad_norms['info_head/grad_norm'].append(
+                    self._current_info_head_grad_sq ** 0.5
+                )
+            if self._current_gate_grad_sq > 0:
+                trainer._thinking_grad_norms['gate/grad_norm'].append(
+                    self._current_gate_grad_sq ** 0.5
+                )
         
         # Reset for next step
         self._current_info_head_grad_sq = 0.0
         self._current_gate_grad_sq = 0.0
-    
-    def on_log(self, args, state, control, logs=None, **kwargs):
-        """Add gradient norms to logs when logging occurs."""
-        if logs is None:
-            return
-        
-        # Average and add to logs
-        for key, values in self._grad_stats.items():
-            if values:
-                logs[key] = sum(values) / len(values)
-        
-        # Clear after logging
-        for key in self._grad_stats:
-            self._grad_stats[key] = []
     
     def on_train_end(self, args, state, control, **kwargs):
         """Remove hooks at training end."""
         for hook in self._hooks:
             hook.remove()
         self._hooks = []
+    
+    def set_trainer(self, trainer):
+        """Set trainer reference for storing gradient norms."""
+        self._trainer = trainer
 
 
 def patch_trainer_optimizer(trainer, lr_info_head=1e-4, lr_token_gate_matrix=1e-4):

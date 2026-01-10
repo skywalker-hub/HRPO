@@ -665,9 +665,9 @@ class GRPOTrainer(Trainer):
         self._metrics["reward_std"].append(std_grouped_rewards.mean().item())
         
         # ============================================================
-        # 记录 thinking 模块的监控指标
+        # 读取 thinking 模块的监控统计值，传递给 compute_loss
         # ============================================================
-        # 获取基础模型（穿透 PEFT 包装）
+        thinking_monitor_stats = {}
         base_model = self.model
         if hasattr(base_model, 'base_model'):
             base_model = base_model.base_model
@@ -676,16 +676,8 @@ class GRPOTrainer(Trainer):
         if hasattr(base_model, 'model'):
             base_model = base_model.model
         
-        # 读取 generate 阶段存储的统计值
         if hasattr(base_model, '_thinking_monitor_stats'):
-            stats = base_model._thinking_monitor_stats
-            if 'g_k_mean' in stats:
-                self._metrics["gate/g_k_mean"].append(stats['g_k_mean'])
-            if 'continuous_bias_norm' in stats:
-                self._metrics["continuous_bias/norm"].append(stats['continuous_bias_norm'])
-            if 'gate_vectors_mean' in stats:
-                self._metrics["gate/raw_mean"].append(stats['gate_vectors_mean'])
-            # 清空统计值
+            thinking_monitor_stats = base_model._thinking_monitor_stats.copy()
             base_model._thinking_monitor_stats = {}
 
         if (
@@ -717,6 +709,7 @@ class GRPOTrainer(Trainer):
             "embeds_ratio": embeds_ratio,
             "ref_per_token_logps": ref_per_token_logps,
             "advantages": advantages,
+            "thinking_monitor_stats": thinking_monitor_stats,  # 传递给 compute_loss
         }
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
@@ -748,6 +741,18 @@ class GRPOTrainer(Trainer):
 
         mean_kl = ((per_token_kl * completion_mask).sum(dim=1) / completion_mask.sum(dim=1)).mean()
         self._metrics["kl"].append(self.accelerator.gather_for_metrics(mean_kl).mean().item())
+        
+        # ============================================================
+        # 记录 thinking 模块的监控指标（与其他指标同步）
+        # ============================================================
+        thinking_stats = inputs.get("thinking_monitor_stats", {})
+        if thinking_stats:
+            if 'g_k_mean' in thinking_stats:
+                self._metrics["gate/g_k_mean"].append(thinking_stats['g_k_mean'])
+            if 'continuous_bias_norm' in thinking_stats:
+                self._metrics["continuous_bias/norm"].append(thinking_stats['continuous_bias_norm'])
+            if 'gate_vectors_mean' in thinking_stats:
+                self._metrics["gate/raw_mean"].append(thinking_stats['gate_vectors_mean'])
 
         return loss
 
@@ -768,6 +773,20 @@ class GRPOTrainer(Trainer):
             metrics = {f"eval_{key}": val for key, val in metrics.items()}
 
         logs = {**logs, **metrics}
+        
+        # ============================================================
+        # 合并梯度范数监控（由 ThinkingModulesMonitorCallback 存储）
+        # ============================================================
+        if hasattr(self, '_thinking_grad_norms'):
+            for key, values in self._thinking_grad_norms.items():
+                if values:
+                    logs[key] = sum(values) / len(values)
+            # 清空
+            self._thinking_grad_norms = {
+                'info_head/grad_norm': [],
+                'gate/grad_norm': [],
+            }
+        
         if version.parse(transformers.__version__) >= version.parse("4.47.0.dev0"):
             super().log(logs, start_time)
         else:  # transformers<=4.46
