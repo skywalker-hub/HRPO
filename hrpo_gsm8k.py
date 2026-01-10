@@ -57,6 +57,52 @@ def main(args):
         random_state = args.seed,
     )
 
+    # ============================================================
+    # 验证 info_head 和 token_gate_matrix 的初始化值
+    # ============================================================
+    print("\n" + "=" * 60)
+    print("检查 Token-Dependent Gated Residual 模块初始化")
+    print("=" * 60)
+    
+    # 获取 PEFT 包装后的模块
+    info_head_wrapper = model.model.model.info_head
+    token_gate_wrapper = model.model.model.token_gate_matrix
+    
+    # 检查 info_head (预期: mean≈0, std≈0.001)
+    if hasattr(info_head_wrapper, 'modules_to_save'):
+        ih_weight = info_head_wrapper.modules_to_save.default.weight
+        print(f"\ninfo_head (modules_to_save.default):")
+        print(f"  Shape: {ih_weight.shape}")
+        print(f"  Mean:  {ih_weight.mean().item():.6f} (预期: ≈0)")
+        print(f"  Std:   {ih_weight.std().item():.6f} (预期: ≈0.001)")
+    else:
+        ih_weight = info_head_wrapper.weight
+        print(f"\ninfo_head (未被PEFT包装!):")
+        print(f"  Mean: {ih_weight.mean().item():.6f}, Std: {ih_weight.std().item():.6f}")
+    
+    # 检查 token_gate_matrix (预期: mean=-4.0, std=0)
+    if hasattr(token_gate_wrapper, 'modules_to_save'):
+        tg_weight = token_gate_wrapper.modules_to_save.default.weight
+        print(f"\ntoken_gate_matrix (modules_to_save.default):")
+        print(f"  Shape: {tg_weight.shape}")
+        print(f"  Mean:  {tg_weight.mean().item():.6f} (预期: -4.0)")
+        print(f"  Std:   {tg_weight.std().item():.6f} (预期: ≈0)")
+        print(f"  Min:   {tg_weight.min().item():.6f}")
+        print(f"  Max:   {tg_weight.max().item():.6f}")
+        
+        # 警告检查
+        if abs(tg_weight.mean().item() - (-4.0)) > 0.1:
+            print(f"\n  ⚠️  警告: token_gate_matrix 未正确初始化为 -4.0!")
+            print(f"      这将导致门一开始就半开 (sigmoid(0)=0.5) 而不是几乎关闭 (sigmoid(-4)≈0.018)")
+        else:
+            print(f"\n  ✅ token_gate_matrix 正确初始化为 -4.0")
+    else:
+        tg_weight = token_gate_wrapper.weight
+        print(f"\ntoken_gate_matrix (未被PEFT包装!):")
+        print(f"  Mean: {tg_weight.mean().item():.6f}, Std: {tg_weight.std().item():.6f}")
+    
+    print("=" * 60 + "\n")
+
     training_args = GRPOConfig(
         use_vllm = False,
         learning_rate = args.lr,

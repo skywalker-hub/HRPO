@@ -2565,24 +2565,14 @@ class FastLlamaModel:
             for module in modules_to_save:
                 if module == "info_head":
                     assert(hasattr(model.model.model.info_head, "modules_to_save"))
-                    info_head_module = model.model.model.info_head.modules_to_save.default
-                    info_head_module.to(device = "cuda", dtype = new_dtype, non_blocking = True)
-                    info_head_module.requires_grad_(True)
-                    # CRITICAL FIX: Re-initialize after PEFT wrapping (PEFT uses default init)
-                    with torch.no_grad():
-                        torch.nn.init.normal_(info_head_module.weight, mean=0.0, std=0.001)
-                    print(f"  - info_head re-initialized: mean={info_head_module.weight.mean().item():.6f}, std={info_head_module.weight.std().item():.6f}")
-                    
+                    model.model.model.info_head.modules_to_save.default\
+                        .to(device = "cuda", dtype = new_dtype, non_blocking = True)
+                    model.model.model.info_head.modules_to_save.default.requires_grad_(True)
                 if module == "token_gate_matrix":
                     assert(hasattr(model.model.model.token_gate_matrix, "modules_to_save"))
-                    token_gate_module = model.model.model.token_gate_matrix.modules_to_save.default
-                    token_gate_module.to(device = "cuda", dtype = new_dtype, non_blocking = True)
-                    token_gate_module.requires_grad_(True)
-                    # CRITICAL FIX: Re-initialize to -4.0 after PEFT wrapping
-                    # sigmoid(-4) ≈ 0.018, so gates start nearly closed
-                    with torch.no_grad():
-                        torch.nn.init.constant_(token_gate_module.weight, -4.0)
-                    print(f"  - token_gate_matrix re-initialized to -4.0: mean={token_gate_module.weight.mean().item():.6f}")
+                    model.model.model.token_gate_matrix.modules_to_save.default\
+                        .to(device = "cuda", dtype = new_dtype, non_blocking = True)
+                    model.model.model.token_gate_matrix.modules_to_save.default.requires_grad_(True)
 
         # Patch tokenizer to pad to the right
         internal_model = model
