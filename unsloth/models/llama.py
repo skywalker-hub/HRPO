@@ -2565,14 +2565,22 @@ class FastLlamaModel:
             for module in modules_to_save:
                 if module == "info_head":
                     assert(hasattr(model.model.model.info_head, "modules_to_save"))
-                    model.model.model.info_head.modules_to_save.default\
-                        .to(device = "cuda", dtype = new_dtype, non_blocking = True)
-                    model.model.model.info_head.modules_to_save.default.requires_grad_(True)
+                    info_head_module = model.model.model.info_head.modules_to_save.default
+                    info_head_module.to(device = "cuda", dtype = new_dtype, non_blocking = True)
+                    info_head_module.requires_grad_(True)
+                    # FIX: PEFT uses default init, must re-initialize to N(0, 0.001)
+                    with torch.no_grad():
+                        torch.nn.init.normal_(info_head_module.weight, mean=0.0, std=0.001)
+                    
                 if module == "token_gate_matrix":
                     assert(hasattr(model.model.model.token_gate_matrix, "modules_to_save"))
-                    model.model.model.token_gate_matrix.modules_to_save.default\
-                        .to(device = "cuda", dtype = new_dtype, non_blocking = True)
-                    model.model.model.token_gate_matrix.modules_to_save.default.requires_grad_(True)
+                    token_gate_module = model.model.model.token_gate_matrix.modules_to_save.default
+                    token_gate_module.to(device = "cuda", dtype = new_dtype, non_blocking = True)
+                    token_gate_module.requires_grad_(True)
+                    # FIX: PEFT uses default init, must re-initialize to -4.0
+                    # sigmoid(-4) ≈ 0.018, so gates start nearly closed
+                    with torch.no_grad():
+                        torch.nn.init.constant_(token_gate_module.weight, -4.0)
 
         # Patch tokenizer to pad to the right
         internal_model = model
