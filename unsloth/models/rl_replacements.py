@@ -513,16 +513,44 @@ def grpo_trainer_compute_loss(function_name, function):
         # Log the metrics
         # Token-Dependent Gated Residual: log thinking ratio based on thinking_mask
         thinking_ratio = thinking_mask.float().mean() if thinking_mask is not None else torch.tensor(0.0)
+
+        # TDGR metrics:
+        # - gate/g_k_mean: mean(sigmoid(token_gate_matrix(ids))) over thinking positions
+        # - continuous_bias/norm: average per-position L2 norm (cached from dynamic recompute forward if available)
+        gate_g_k_mean = 0.0
+        continuous_bias_norm = 0.0
+        try:
+            # Locate the core (decoder) module where info_head/token_gate_matrix live.
+            core = model
+            if hasattr(core, "model"): core = core.model
+            if hasattr(core, "model"): core = core.model
+
+            if thinking_mask is not None and thinking_mask.any() and hasattr(core, "token_gate_matrix"):
+                ids_for_thinking = _input_ids[thinking_mask]  # (num_thinking_positions,)
+                gate_vectors = core.token_gate_matrix(ids_for_thinking)
+                g_k = torch.sigmoid(gate_vectors)
+                gate_g_k_mean = g_k.detach().float().mean().item()
+
+            # Prefer the forward-cached value from dynamic recomputation (more faithful to training path).
+            if hasattr(core, "_tdgr_last_continuous_bias_norm"):
+                continuous_bias_norm = float(getattr(core, "_tdgr_last_continuous_bias_norm"))
+        except Exception:
+            gate_g_k_mean = 0.0
+            continuous_bias_norm = 0.0
         
         if "train" in self._metrics:
             mode = "eval" if self.control.should_evaluate else "train"
             self._metrics[mode]["thinking_ratio"].append(thinking_ratio.item())
             self._metrics[mode]["completion_length"].append(completion_length.item())
             self._metrics[mode]["kl"].append(mean_kl.item())
+            self._metrics[mode]["gate/g_k_mean"].append(gate_g_k_mean)
+            self._metrics[mode]["continuous_bias/norm"].append(continuous_bias_norm)
         else:
             self._metrics["thinking_ratio"].append(thinking_ratio.item())
             self._metrics["completion_length"].append(completion_length.item())
             self._metrics["kl"].append(mean_kl.item())
+            self._metrics["gate/g_k_mean"].append(gate_g_k_mean)
+            self._metrics["continuous_bias/norm"].append(continuous_bias_norm)
         return loss
     pass
 

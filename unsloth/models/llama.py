@@ -720,6 +720,19 @@ def LlamaModel_fast_forward(
             # α = 1/hidden_size ensures injection scale is controlled regardless of gate values
             alpha = 1.0 / self.config.hidden_size
             continuous_bias = alpha * v_t_norm * g_k  # (num_thinking_positions, hidden_dim)
+
+            # Cache TDGR metrics for logging (read by trainer-side hooks)
+            # Use per-position L2 norm averaged across thinking positions for stability.
+            with torch.no_grad():
+                try:
+                    self._tdgr_last_g_k_mean = g_k.detach().float().mean().item()
+                    self._tdgr_last_continuous_bias_norm = (
+                        continuous_bias.detach().float().norm(dim=-1).mean().item()
+                    )
+                except Exception:
+                    # Never fail forward due to logging.
+                    self._tdgr_last_g_k_mean = 0.0
+                    self._tdgr_last_continuous_bias_norm = 0.0
             
             # Step D: Residual injection
             # inputs_embeds = original_token_embeds + continuous_bias

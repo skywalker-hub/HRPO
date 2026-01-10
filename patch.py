@@ -1,6 +1,8 @@
 import types
 from transformers.trainer import *
 
+from tdgr_metrics_callback import ensure_tdgr_metrics_callback
+
 
 def patch_trainer_optimizer(trainer, lr_info_head=1e-4, lr_token_gate_matrix=1e-4):
     """
@@ -96,3 +98,6 @@ def patch_trainer_optimizer(trainer, lr_info_head=1e-4, lr_token_gate_matrix=1e-
 
     trainer._old_create_optimizer = trainer.create_optimizer
     trainer.create_optimizer = types.MethodType(create_optimizer, trainer)
+
+    # Ensure TDGR metrics are logged to stdout + W&B.
+    ensure_tdgr_metrics_callback(trainer)
