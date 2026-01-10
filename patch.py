@@ -8,52 +8,54 @@ class ThinkingModulesMonitorCallback(TrainerCallback):
     """
     Callback to monitor gradient norms of info_head and token_gate_matrix modules.
     
-    Note: gate/g_k_mean, continuous_bias/norm are recorded directly in GRPOTrainer.
-    This callback only handles gradient norms which need to be computed after backward.
+    Uses backward hooks to capture gradients before they are cleared by zero_grad().
     """
     
-    def __init__(self, trainer_ref=None):
-        self.trainer_ref = trainer_ref
+    def __init__(self):
         self._grad_stats = {
             'info_head/grad_norm': [],
             'gate/grad_norm': [],
         }
+        self._hooks = []
+        self._current_info_head_grad_sq = 0.0
+        self._current_gate_grad_sq = 0.0
     
-    def _compute_grad_norm(self, params):
-        """Compute gradient L2 norm for a list of parameters."""
-        total_norm = 0.0
-        for p in params:
-            if p.grad is not None:
-                total_norm += p.grad.data.norm(2).item() ** 2
-        return total_norm ** 0.5
+    def _make_hook(self, module_type):
+        """Create a hook function for the given module type."""
+        def hook(grad):
+            grad_norm_sq = grad.detach().norm(2).item() ** 2
+            if module_type == 'info_head':
+                self._current_info_head_grad_sq += grad_norm_sq
+            else:
+                self._current_gate_grad_sq += grad_norm_sq
+        return hook
     
     def on_train_begin(self, args, state, control, model=None, **kwargs):
-        """Save model reference at training start."""
-        self._model = model
-    
-    def on_step_end(self, args, state, control, **kwargs):
-        """Compute gradient norms after each training step."""
-        model = self._model if hasattr(self, '_model') else kwargs.get('model')
+        """Register gradient hooks at training start."""
         if model is None:
             return
         
-        # Compute gradient norms for info_head and token_gate_matrix
-        info_head_params = []
-        token_gate_params = []
-        
+        # Register hooks on parameters
         for name, param in model.named_parameters():
-            if 'info_head' in name and param.requires_grad:
-                info_head_params.append(param)
-            elif 'token_gate_matrix' in name and param.requires_grad:
-                token_gate_params.append(param)
+            if param.requires_grad:
+                if 'info_head' in name:
+                    hook = param.register_hook(self._make_hook('info_head'))
+                    self._hooks.append(hook)
+                elif 'token_gate_matrix' in name:
+                    hook = param.register_hook(self._make_hook('gate'))
+                    self._hooks.append(hook)
+    
+    def on_step_end(self, args, state, control, **kwargs):
+        """Collect gradient norms after backward (hooks already captured them)."""
+        # Record the accumulated gradient norms
+        if self._current_info_head_grad_sq > 0:
+            self._grad_stats['info_head/grad_norm'].append(self._current_info_head_grad_sq ** 0.5)
+        if self._current_gate_grad_sq > 0:
+            self._grad_stats['gate/grad_norm'].append(self._current_gate_grad_sq ** 0.5)
         
-        if info_head_params:
-            grad_norm = self._compute_grad_norm(info_head_params)
-            self._grad_stats['info_head/grad_norm'].append(grad_norm)
-        
-        if token_gate_params:
-            grad_norm = self._compute_grad_norm(token_gate_params)
-            self._grad_stats['gate/grad_norm'].append(grad_norm)
+        # Reset for next step
+        self._current_info_head_grad_sq = 0.0
+        self._current_gate_grad_sq = 0.0
     
     def on_log(self, args, state, control, logs=None, **kwargs):
         """Add gradient norms to logs when logging occurs."""
@@ -68,6 +70,12 @@ class ThinkingModulesMonitorCallback(TrainerCallback):
         # Clear after logging
         for key in self._grad_stats:
             self._grad_stats[key] = []
+    
+    def on_train_end(self, args, state, control, **kwargs):
+        """Remove hooks at training end."""
+        for hook in self._hooks:
+            hook.remove()
+        self._hooks = []
 
 
 def patch_trainer_optimizer(trainer, lr_info_head=1e-4, lr_token_gate_matrix=1e-4):
