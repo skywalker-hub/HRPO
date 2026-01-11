@@ -155,7 +155,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=5e-6)
     parser.add_argument("--beta", type=float, default=0.005)
     parser.add_argument("--lr_info_head", type=float, default=1e-4)
-    parser.add_argument("--lr_token_gate_matrix", type=float, default=1e-2)
+    parser.add_argument("--lr_token_gate_matrix", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=0.1)
     parser.add_argument("--warmup_ratio", type=float, default=0.1)
     parser.add_argument("--lr_scheduler_type", type=str, default="cosine")
