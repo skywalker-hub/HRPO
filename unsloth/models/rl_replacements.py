@@ -601,25 +601,7 @@ def grpo_trainer_compute_loss(function_name, function):
                 except Exception:
                     pass
 
-        # 5) print one-time debug if still zeros despite thinking
-        if has_thinking and (gate_g_k_mean == 0.0) and (continuous_bias_norm == 0.0) and (not hasattr(self, "_tdgr_debug_printed")):
-            try:
-                is_main = True
-                if hasattr(self, "accelerator"):
-                    is_main = bool(getattr(self.accelerator, "is_main_process", True))
-                if is_main:
-                    print("\n[TDGR DEBUG] metrics are 0 despite thinking_ratio>0")
-                    print(f"[TDGR DEBUG] thinking_mask: type={type(thinking_mask)}, dim={getattr(thinking_mask, 'dim', lambda: 'NA')()}, sum={n_thinking}")
-                    print(f"[TDGR DEBUG] thinking_embeds: type={type(thinking_embeds)}, shape={getattr(thinking_embeds, 'shape', None)}")
-                    print(f"[TDGR DEBUG] token_gate_weight_found={token_gate_weight is not None}, name={token_gate_weight_name}")
-                    if token_gate_weight is not None:
-                        w = token_gate_weight.detach()
-                        print(f"[TDGR DEBUG] token_gate_weight stats: mean={w.float().mean().item():.6f}, min={w.float().min().item():.6f}, max={w.float().max().item():.6f}")
-                    print(f"[TDGR DEBUG] aux: {tdgr_debug}")
-                    print("[TDGR DEBUG] end\n")
-                setattr(self, "_tdgr_debug_printed", True)
-            except Exception:
-                setattr(self, "_tdgr_debug_printed", True)
+        # NOTE: keep this section quiet; debugging prints were temporary.
         
         if "train" in self._metrics:
             mode = "eval" if self.control.should_evaluate else "train"
