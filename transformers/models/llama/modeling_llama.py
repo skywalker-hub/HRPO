@@ -587,7 +587,11 @@ class LlamaModel(LlamaPreTrainedModel):
         g_k = torch.sigmoid(gate_vectors)  # Independent gates, can be all-open, all-closed, or mixed
         
         # Step D: Element-wise multiplication with learnable scale factor α (initialized to 1/hidden_size)
-        alpha = self.tdgr_alpha().to(dtype=v_t_norm.dtype)
+        alpha_mod = self.tdgr_alpha
+        # If PEFT wrapped, use the real module behind modules_to_save (wrapper forward expects an input).
+        if hasattr(alpha_mod, "modules_to_save"):
+            alpha_mod = alpha_mod.modules_to_save.default
+        alpha = alpha_mod().to(dtype=v_t_norm.dtype)
         continuous_bias = alpha * v_t_norm * g_k
         
         return continuous_bias

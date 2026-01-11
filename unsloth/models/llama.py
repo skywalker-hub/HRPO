@@ -718,7 +718,11 @@ def LlamaModel_fast_forward(
             
             # Step D: Element-wise multiplication with (optionally) learnable scale factor α
             if hasattr(self, "tdgr_alpha"):
-                alpha = self.tdgr_alpha().to(dtype=v_t_norm.dtype)
+                alpha_mod = self.tdgr_alpha
+                # If PEFT wrapped, use the real module behind modules_to_save to avoid wrapper forward(x) signature.
+                if hasattr(alpha_mod, "modules_to_save"):
+                    alpha_mod = alpha_mod.modules_to_save.default
+                alpha = alpha_mod().to(dtype=v_t_norm.dtype)
             else:
                 alpha = 1.0 / self.config.hidden_size
             continuous_bias = alpha * v_t_norm * g_k  # (num_thinking_positions, hidden_dim)
@@ -1043,7 +1047,10 @@ def LlamaModel_fast_forward_inference(
             
             # Step D: Element-wise multiplication with (optionally) learnable scale factor α
             if hasattr(self.model, "tdgr_alpha"):
-                alpha = self.model.tdgr_alpha().to(dtype=v_t_norm.dtype)
+                alpha_mod = self.model.tdgr_alpha
+                if hasattr(alpha_mod, "modules_to_save"):
+                    alpha_mod = alpha_mod.modules_to_save.default
+                alpha = alpha_mod().to(dtype=v_t_norm.dtype)
             else:
                 alpha = 1.0 / self.config.hidden_size
             continuous_bias = alpha * v_t_norm * g_k  # (batch_size, hidden_dim)
