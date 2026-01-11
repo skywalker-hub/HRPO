@@ -51,6 +51,7 @@ def main(args):
         modules_to_save = [
             "info_head",
             "token_gate_matrix",
+            "tdgr_alpha",
         ], 
         lora_alpha = args.lora_rank * 2,
         use_gradient_checkpointing = "unsloth",

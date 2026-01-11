@@ -716,9 +716,11 @@ def LlamaModel_fast_forward(
             gate_vectors = self.token_gate_matrix(ids_for_thinking)  # (num_thinking_positions, hidden_dim)
             g_k = torch.sigmoid(gate_vectors)  # Independent gates, can be all-open, all-closed, or mixed
             
-            # Step D: Element-wise multiplication with explicit scale factor
-            # α = 1/hidden_size ensures injection scale is controlled regardless of gate values
-            alpha = 1.0 / self.config.hidden_size
+            # Step D: Element-wise multiplication with (optionally) learnable scale factor α
+            if hasattr(self, "tdgr_alpha"):
+                alpha = self.tdgr_alpha().to(dtype=v_t_norm.dtype)
+            else:
+                alpha = 1.0 / self.config.hidden_size
             continuous_bias = alpha * v_t_norm * g_k  # (num_thinking_positions, hidden_dim)
 
             # Cache TDGR metrics for logging (read by trainer-side hooks)
@@ -1039,9 +1041,11 @@ def LlamaModel_fast_forward_inference(
             gate_vectors = self.model.token_gate_matrix(input_ids.squeeze(-1))  # (batch_size, hidden_dim)
             g_k = torch.sigmoid(gate_vectors)  # Independent gates, can be all-open, all-closed, or mixed
             
-            # Step D: Element-wise multiplication with explicit scale factor
-            # α = 1/hidden_size ensures injection scale is controlled regardless of gate values
-            alpha = 1.0 / self.config.hidden_size
+            # Step D: Element-wise multiplication with (optionally) learnable scale factor α
+            if hasattr(self.model, "tdgr_alpha"):
+                alpha = self.model.tdgr_alpha().to(dtype=v_t_norm.dtype)
+            else:
+                alpha = 1.0 / self.config.hidden_size
             continuous_bias = alpha * v_t_norm * g_k  # (batch_size, hidden_dim)
             
             # Step D: Residual injection (only for thinking positions)
@@ -2398,7 +2402,7 @@ class FastLlamaModel:
                 if modules_to_save is None: modules_to_save = ["embed_tokens"]
                 else: modules_to_save.append("embed_tokens")
 
-            elif module in ("info_head", "token_gate_matrix"):
+            elif module in ("info_head", "token_gate_matrix", "tdgr_alpha"):
                 train_thinking_components = True
                 if modules_to_save is None: modules_to_save = [module]
                 else: modules_to_save.append(module)
@@ -2453,12 +2457,12 @@ class FastLlamaModel:
                     train_lm_head = True
                 elif module == "embed_tokens":
                     train_embed_tokens = True
-                elif module in ("info_head", "token_gate_matrix"):
+                elif module in ("info_head", "token_gate_matrix", "tdgr_alpha"):
                     train_thinking_components = True
                 else:
                     raise TypeError(
                         f"Unsloth: Module = {module} is not allowed. Only 'lm_head', 'embed_tokens', "
-                        "'info_head' and 'token_gate_matrix' components are allowed."
+                        "'info_head', 'token_gate_matrix' and 'tdgr_alpha' components are allowed."
                     )
             pass
         pass
@@ -2594,6 +2598,17 @@ class FastLlamaModel:
                     # sigmoid(-4) ≈ 0.018, so gates start nearly closed
                     with torch.no_grad():
                         torch.nn.init.constant_(token_gate_module.weight, -4.0)
+
+                if module == "tdgr_alpha":
+                    assert(hasattr(model.model.model.tdgr_alpha, "modules_to_save"))
+                    alpha_module = model.model.model.tdgr_alpha.modules_to_save.default
+                    # Keep alpha in fp32 for numerical stability (it's just 1 scalar).
+                    alpha_module.to(device = "cuda", dtype = torch.float32, non_blocking = True)
+                    alpha_module.requires_grad_(True)
+                    # Initialize to log(1/hidden_size)
+                    with torch.no_grad():
+                        init = torch.tensor(1.0 / float(model.model.model.config.hidden_size), device="cuda", dtype=torch.float32)
+                        alpha_module.log_alpha.copy_(init.log())
 
         # Patch tokenizer to pad to the right
         internal_model = model

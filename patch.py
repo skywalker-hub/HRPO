@@ -27,21 +27,32 @@ def patch_trainer_optimizer(trainer, lr_info_head=1e-4, lr_token_gate_matrix=1e-
             optimizer_grouped_parameters = [
                 {
                     "params": [
-                        p for n, p in opt_model.named_parameters() if ("info_head" not in n and "token_gate_matrix" not in n and n in decay_parameters and p.requires_grad)
+                        p for n, p in opt_model.named_parameters()
+                        if (
+                            ("info_head" not in n and "token_gate_matrix" not in n and "tdgr_alpha" not in n)
+                            and n in decay_parameters
+                            and p.requires_grad
+                        )
                     ],
                     "lr": self.args.learning_rate,
                     "weight_decay": self.args.weight_decay,
                 },
                 {
                     "params": [
-                        p for n, p in opt_model.named_parameters() if ("info_head" not in n and "token_gate_matrix" not in n and n not in decay_parameters and p.requires_grad)
+                        p for n, p in opt_model.named_parameters()
+                        if (
+                            ("info_head" not in n and "token_gate_matrix" not in n and "tdgr_alpha" not in n)
+                            and n not in decay_parameters
+                            and p.requires_grad
+                        )
                     ],
                     "lr": self.args.learning_rate,
                     "weight_decay": 0.0,
                 },
                 {
                     "params": [
-                        p for n, p in opt_model.named_parameters() if ("info_head" in n and p.requires_grad)
+                        p for n, p in opt_model.named_parameters()
+                        if (("info_head" in n or "tdgr_alpha" in n) and p.requires_grad)
                     ],
                     "lr": lr_info_head,
                     "weight_decay": self.args.weight_decay,

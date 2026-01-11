@@ -173,6 +173,24 @@ class TDGRMetricsCallback(TrainerCallback):
             except Exception:
                 pass
 
+        # tdgr_alpha value (if present)
+        try:
+            # Prefer modules_to_save copy if PEFT wrapped.
+            alpha_mod = None
+            for name, mod in m.named_modules():
+                if name.endswith("tdgr_alpha.modules_to_save.default"):
+                    alpha_mod = mod
+                    break
+            if alpha_mod is None and hasattr(m, "tdgr_alpha"):
+                alpha_mod = getattr(m, "tdgr_alpha")
+                if hasattr(alpha_mod, "modules_to_save"):
+                    alpha_mod = alpha_mod.modules_to_save.default
+            if alpha_mod is not None and hasattr(alpha_mod, "log_alpha"):
+                with torch.no_grad():
+                    logs["tdgr_alpha/value"] = float(alpha_mod.log_alpha.detach().float().exp().item())
+        except Exception:
+            pass
+
 
 def ensure_tdgr_metrics_callback(trainer) -> None:
     """

@@ -38,6 +38,22 @@ from .configuration_qwen2 import Qwen2Config
 
 logger = logging.get_logger(__name__)
 
+class TDGRAlpha(nn.Module):
+    """
+    Learnable scalar alpha for Token-Dependent Gated Residual (TDGR).
+
+    Parameterization: alpha = exp(log_alpha) to keep it positive.
+    Initialized to 1/hidden_size.
+    """
+
+    def __init__(self, hidden_size: int):
+        super().__init__()
+        init = torch.tensor(1.0 / float(hidden_size), dtype=torch.float32)
+        self.log_alpha = nn.Parameter(init.log())
+
+    def forward(self) -> torch.Tensor:
+        return self.log_alpha.exp()
+
 _CHECKPOINT_FOR_DOC = "meta-qwen2/Qwen2-2-7b-hf"
 _CONFIG_FOR_DOC = "Qwen2Config"
 
@@ -498,6 +514,8 @@ class Qwen2Model(Qwen2PreTrainedModel):
         # token_gate_matrix: Learnable embedding for token-dependent gating
         # Shape: (vocab_size, hidden_dim), initialized to 0
         self.token_gate_matrix = nn.Embedding(config.vocab_size, config.hidden_size)
+        # tdgr_alpha: Learnable scalar injection scale (positive via exp(log_alpha))
+        self.tdgr_alpha = TDGRAlpha(config.hidden_size)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -544,9 +562,8 @@ class Qwen2Model(Qwen2PreTrainedModel):
         gate_vectors = self.token_gate_matrix(input_ids)  # (batch_size, hidden_dim) or (batch_size, seq_len, hidden_dim)
         g_k = torch.sigmoid(gate_vectors)  # Independent gates, can be all-open, all-closed, or mixed
         
-        # Step D: Element-wise multiplication with explicit scale factor
-        # α = 1/hidden_size ensures injection scale is controlled regardless of gate values
-        alpha = 1.0 / self.config.hidden_size
+        # Step D: Element-wise multiplication with learnable scale factor α (initialized to 1/hidden_size)
+        alpha = self.tdgr_alpha().to(dtype=v_t_norm.dtype)
         continuous_bias = alpha * v_t_norm * g_k
         
         return continuous_bias
