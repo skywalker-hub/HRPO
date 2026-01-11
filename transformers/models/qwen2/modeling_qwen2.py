@@ -48,7 +48,9 @@ class TDGRAlpha(nn.Module):
 
     def __init__(self, hidden_size: int):
         super().__init__()
-        init = torch.tensor(1.0 / float(hidden_size), dtype=torch.float32)
+        # NOTE: keep shape=(1,) (not scalar) to avoid HF weight-loading edge case
+        # where torch.empty(*param.size()) would receive no size args.
+        init = torch.tensor([1.0 / float(hidden_size)], dtype=torch.float32)
         self.log_alpha = nn.Parameter(init.log())
 
     def forward(self) -> torch.Tensor:

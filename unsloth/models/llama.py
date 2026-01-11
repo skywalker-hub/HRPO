@@ -2607,7 +2607,7 @@ class FastLlamaModel:
                     alpha_module.requires_grad_(True)
                     # Initialize to log(1/hidden_size)
                     with torch.no_grad():
-                        init = torch.tensor(1.0 / float(model.model.model.config.hidden_size), device="cuda", dtype=torch.float32)
+                        init = torch.tensor([1.0 / float(model.model.model.config.hidden_size)], device="cuda", dtype=torch.float32)
                         alpha_module.log_alpha.copy_(init.log())
 
         # Patch tokenizer to pad to the right
