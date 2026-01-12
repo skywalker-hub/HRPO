@@ -506,14 +506,16 @@ def grpo_trainer_compute_loss(function_name, function):
         except:
             pass
 
-        # 获取 token_gate_weight 的梯度范数（通过 named_parameters 查找，兼容 PEFT 包装）
+        # 获取 token_gate_weight 的梯度范数（和 thinking_residual_head 一样的方式）
         token_gate_grad_norm = 0.0
         try:
-            for name, param in self.model.named_parameters():
-                if 'token_gate_weight' in name and param.requires_grad:
-                    if param.grad is not None:
-                        token_gate_grad_norm = param.grad.norm().item()
-                    break
+            base_model = self.model
+            while hasattr(base_model, 'model'):
+                base_model = base_model.model
+            if hasattr(base_model, 'token_gate_weight'):
+                gate_weight = base_model.token_gate_weight.weight
+                if gate_weight.grad is not None:
+                    token_gate_grad_norm = gate_weight.grad.norm().item()
         except:
             pass
 
