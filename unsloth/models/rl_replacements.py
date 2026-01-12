@@ -496,22 +496,56 @@ def grpo_trainer_compute_loss(function_name, function):
         # 获取 thinking_residual_head 和 token_gate_weight 的梯度范数
         new_head_norm = 0.0
         token_gate_grad_norm = 0.0
+        def _get_weight_grad_norm(module):
+            """
+            Robustly get grad norm for modules that might be wrapped by PEFT's `modules_to_save`.
+            Returns 0.0 if grad is None / not found.
+            """
+            # Direct module.weight (plain nn.Linear / custom module with a `weight` Parameter)
+            try:
+                w = getattr(module, "weight", None)
+                if w is not None and getattr(w, "grad", None) is not None:
+                    return w.grad.norm().item()
+            except Exception:
+                pass
+
+            # PEFT ModulesToSaveWrapper: module.modules_to_save.default.weight
+            mts = getattr(module, "modules_to_save", None)
+            if mts is not None:
+                try:
+                    default = getattr(mts, "default", None)
+                    if default is None and isinstance(mts, dict):
+                        default = mts.get("default", None)
+                    if default is not None:
+                        w = getattr(default, "weight", None)
+                        if w is not None and getattr(w, "grad", None) is not None:
+                            return w.grad.norm().item()
+                except Exception:
+                    pass
+
+            # Fallback: PEFT wrappers sometimes keep a frozen original_module
+            try:
+                orig = getattr(module, "original_module", None)
+                if orig is not None:
+                    w = getattr(orig, "weight", None)
+                    if w is not None and getattr(w, "grad", None) is not None:
+                        return w.grad.norm().item()
+            except Exception:
+                pass
+
+            return 0.0
+
         try:
             base_model = self.model
-            while hasattr(base_model, 'model'):
+            while hasattr(base_model, "model"):
                 base_model = base_model.model
-            # thinking_residual_head
-            if hasattr(base_model, 'thinking_residual_head'):
-                head_weight = base_model.thinking_residual_head.weight
-                if head_weight.grad is not None:
-                    new_head_norm = head_weight.grad.norm().item()
-            # token_gate_weight（和 thinking_residual_head 同级）
-            if hasattr(base_model, 'token_gate_weight'):
-                gate_weight = base_model.token_gate_weight.weight
-                if gate_weight.grad is not None:
-                    token_gate_grad_norm = gate_weight.grad.norm().item()
-        except:
-            pass
+        except Exception:
+            base_model = None
+
+        if base_model is not None and hasattr(base_model, "thinking_residual_head"):
+            new_head_norm = _get_weight_grad_norm(base_model.thinking_residual_head)
+        if base_model is not None and hasattr(base_model, "token_gate_weight"):
+            token_gate_grad_norm = _get_weight_grad_norm(base_model.token_gate_weight)
 
         if "train" in self._metrics:
             mode = "eval" if self.control.should_evaluate else "train"
