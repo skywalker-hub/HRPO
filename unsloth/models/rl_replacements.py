@@ -493,47 +493,60 @@ def grpo_trainer_compute_loss(function_name, function):
         mean_embeds_ratio = embeds_ratio[embeds_ratio_mask].mean()
         mean_hidden_ratio = torch.sqrt(1 - embeds_ratio[embeds_ratio_mask] ** 2).mean()
 
-        # 获取 thinking_residual_head 和 token_gate_weight 的梯度范数
+        # 获取 thinking_residual_head 和 token_gate_weight 的梯度范数 & 诊断信息
+        # 注意：这里是在下一 step 的 compute_loss 里读取“上一 step 的 grad”（取决于 zero_grad 的时机）。
         new_head_norm = 0.0
         token_gate_grad_norm = 0.0
+        new_head_weight_absmax = 0.0
+        token_gate_weight_absmax = 0.0
+        token_gate_grad_absmax = 0.0
+        token_gate_requires_grad = False
+
+        def _get_weight_tensor(module):
+            """
+            Return the underlying weight Parameter for both plain modules and PEFT `modules_to_save` wrappers.
+            """
+            w = getattr(module, "weight", None)
+            if w is not None:
+                return w
+
+            mts = getattr(module, "modules_to_save", None)
+            if mts is not None:
+                # Common: mts.default (ModuleToSave) OR mts["default"]
+                default = getattr(mts, "default", None)
+                if default is None and isinstance(mts, dict):
+                    default = mts.get("default", None)
+
+                # If default key isn't present (adapter name may differ), pick the first module
+                if default is None:
+                    try:
+                        # ModuleDict / dict-like
+                        if hasattr(mts, "values"):
+                            default = next(iter(mts.values()), None)
+                    except Exception:
+                        default = None
+
+                if default is not None:
+                    return getattr(default, "weight", None)
+
+            orig = getattr(module, "original_module", None)
+            if orig is not None:
+                return getattr(orig, "weight", None)
+
+            return None
+
         def _get_weight_grad_norm(module):
             """
             Robustly get grad norm for modules that might be wrapped by PEFT's `modules_to_save`.
             Returns 0.0 if grad is None / not found.
             """
-            # Direct module.weight (plain nn.Linear / custom module with a `weight` Parameter)
-            try:
-                w = getattr(module, "weight", None)
-                if w is not None and getattr(w, "grad", None) is not None:
-                    return w.grad.norm().item()
-            except Exception:
-                pass
-
-            # PEFT ModulesToSaveWrapper: module.modules_to_save.default.weight
-            mts = getattr(module, "modules_to_save", None)
-            if mts is not None:
-                try:
-                    default = getattr(mts, "default", None)
-                    if default is None and isinstance(mts, dict):
-                        default = mts.get("default", None)
-                    if default is not None:
-                        w = getattr(default, "weight", None)
-                        if w is not None and getattr(w, "grad", None) is not None:
-                            return w.grad.norm().item()
-                except Exception:
-                    pass
-
-            # Fallback: PEFT wrappers sometimes keep a frozen original_module
-            try:
-                orig = getattr(module, "original_module", None)
-                if orig is not None:
-                    w = getattr(orig, "weight", None)
-                    if w is not None and getattr(w, "grad", None) is not None:
-                        return w.grad.norm().item()
-            except Exception:
-                pass
-
-            return 0.0
+            w = _get_weight_tensor(module)
+            if w is None:
+                return 0.0
+            g = getattr(w, "grad", None)
+            if g is None:
+                return 0.0
+            return g.norm().item()
 
         try:
             base_model = self.model
@@ -544,8 +557,24 @@ def grpo_trainer_compute_loss(function_name, function):
 
         if base_model is not None and hasattr(base_model, "thinking_residual_head"):
             new_head_norm = _get_weight_grad_norm(base_model.thinking_residual_head)
+            _w = _get_weight_tensor(base_model.thinking_residual_head)
+            if _w is not None:
+                try:
+                    new_head_weight_absmax = _w.detach().abs().max().item()
+                except Exception:
+                    pass
+
         if base_model is not None and hasattr(base_model, "token_gate_weight"):
             token_gate_grad_norm = _get_weight_grad_norm(base_model.token_gate_weight)
+            _w = _get_weight_tensor(base_model.token_gate_weight)
+            if _w is not None:
+                try:
+                    token_gate_weight_absmax = _w.detach().abs().max().item()
+                    token_gate_requires_grad = bool(getattr(_w, "requires_grad", False))
+                    if getattr(_w, "grad", None) is not None:
+                        token_gate_grad_absmax = _w.grad.detach().abs().max().item()
+                except Exception:
+                    pass
 
         if "train" in self._metrics:
             mode = "eval" if self.control.should_evaluate else "train"
@@ -555,6 +584,10 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics[mode]["kl"].append(mean_kl.item())
             self._metrics[mode]["new_head_norm"].append(new_head_norm)
             self._metrics[mode]["token_gate_grad_norm"].append(token_gate_grad_norm)
+            self._metrics[mode]["new_head_weight_absmax"].append(new_head_weight_absmax)
+            self._metrics[mode]["token_gate_weight_absmax"].append(token_gate_weight_absmax)
+            self._metrics[mode]["token_gate_grad_absmax"].append(token_gate_grad_absmax)
+            self._metrics[mode]["token_gate_requires_grad"].append(float(token_gate_requires_grad))
         else:
             self._metrics["embeds_ratio"].append(mean_embeds_ratio.item())
             self._metrics["hidden_ratio"].append(mean_hidden_ratio.item())
@@ -562,6 +595,10 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics["kl"].append(mean_kl.item())
             self._metrics["new_head_norm"].append(new_head_norm)
             self._metrics["token_gate_grad_norm"].append(token_gate_grad_norm)
+            self._metrics["new_head_weight_absmax"].append(new_head_weight_absmax)
+            self._metrics["token_gate_weight_absmax"].append(token_gate_weight_absmax)
+            self._metrics["token_gate_grad_absmax"].append(token_gate_grad_absmax)
+            self._metrics["token_gate_requires_grad"].append(float(token_gate_requires_grad))
         return loss
     pass
 
