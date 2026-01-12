@@ -513,13 +513,9 @@ def grpo_trainer_compute_loss(function_name, function):
                 if 'token_gate_weight' in name and param.requires_grad:
                     if param.grad is not None:
                         token_gate_grad_norm = param.grad.norm().item()
-                    else:
-                        token_gate_grad_norm = -1.0  # 参数存在且 requires_grad=True 但无梯度
                     break
-            else:
-                token_gate_grad_norm = -2.0  # 未找到 token_gate_weight 参数
-        except Exception as e:
-            token_gate_grad_norm = -3.0  # 发生异常
+        except:
+            pass
 
         if "train" in self._metrics:
             mode = "eval" if self.control.should_evaluate else "train"
