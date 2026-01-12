@@ -63,7 +63,15 @@ def main(args):
     # 零初始化 thinking_residual_head，让训练初期 h_residual=0，模型行为与原来一致
     # 这样可以避免随机噪声扰乱模型输出，让模型渐进地学习如何利用隐状态
     import torch.nn as nn
-    nn.init.zeros_(model.model.model.thinking_residual_head.weight)
+    # 初始化 thinking_residual_head：
+    # - std=0.0  -> 全 0（保持你当前默认行为）
+    # - std>0.0  -> 极小正态随机（可让 token_gate_weight 从 step0 就有梯度）
+    thinking_residual_head_init_std = 0.0001
+
+    if thinking_residual_head_init_std == 0.0:
+        nn.init.zeros_(model.model.model.thinking_residual_head.weight)
+    else:
+        nn.init.normal_(model.model.model.thinking_residual_head.weight, mean=0.0, std=thinking_residual_head_init_std)
     
     # 初始化 token_gate_weight（0 → sigmoid=0.5，-3 → sigmoid≈0.047）
     token_gate_init_value = -2.0
