@@ -493,17 +493,32 @@ def grpo_trainer_compute_loss(function_name, function):
         mean_embeds_ratio = embeds_ratio[embeds_ratio_mask].mean()
         mean_hidden_ratio = torch.sqrt(1 - embeds_ratio[embeds_ratio_mask] ** 2).mean()
 
+        # 获取 thinking_residual_head 的梯度范数
+        new_head_norm = 0.0
+        try:
+            base_model = self.model
+            while hasattr(base_model, 'model'):
+                base_model = base_model.model
+            if hasattr(base_model, 'thinking_residual_head'):
+                head_weight = base_model.thinking_residual_head.weight
+                if head_weight.grad is not None:
+                    new_head_norm = head_weight.grad.norm().item()
+        except:
+            pass
+
         if "train" in self._metrics:
             mode = "eval" if self.control.should_evaluate else "train"
             self._metrics[mode]["embeds_ratio"].append(mean_embeds_ratio.item())
             self._metrics[mode]["hidden_ratio"].append(mean_hidden_ratio.item())
             self._metrics[mode]["completion_length"].append(completion_length.item())
             self._metrics[mode]["kl"].append(mean_kl.item())
+            self._metrics[mode]["new_head_norm"].append(new_head_norm)
         else:
             self._metrics["embeds_ratio"].append(mean_embeds_ratio.item())
             self._metrics["hidden_ratio"].append(mean_hidden_ratio.item())
             self._metrics["completion_length"].append(completion_length.item())
             self._metrics["kl"].append(mean_kl.item())
+            self._metrics["new_head_norm"].append(new_head_norm)
         return loss
     pass
 
