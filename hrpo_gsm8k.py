@@ -65,9 +65,9 @@ def main(args):
     import torch.nn as nn
     nn.init.zeros_(model.model.model.thinking_residual_head.weight)
     
-    # 零初始化 token_gate_linear，让训练初期门控接近 0.5（sigmoid(0)=0.5）
-    # 这样可以让模型渐进地学习如何利用 token 级门控
-    nn.init.zeros_(model.model.model.token_gate_linear.weight)
+    # 初始化 token_gate_linear 权重（0 → sigmoid=0.5，-3 → sigmoid≈0.047）
+    token_gate_init_value = 0.0
+    nn.init.constant_(model.model.model.token_gate_linear.weight, token_gate_init_value)
 
     training_args = GRPOConfig(
         use_vllm = False,
