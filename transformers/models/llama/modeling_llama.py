@@ -543,9 +543,10 @@ class LlamaModel(LlamaPreTrainedModel):
         # 新增：隐状态变换头，将原始隐状态投影到 thinking residual 空间
         self.thinking_residual_head = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
         
-        # 新增：Token 级门控层，复用 embed_tokens 获取 token 嵌入后变换为门控向量
+        # 新增：Token 级门控矩阵，形状 (vocab_size, hidden_size)
         # 用于基于离散 token ID 控制连续信息的融合程度
-        self.token_gate_linear = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
+        # 使用 nn.Parameter 直接定义，通过索引查表
+        self.token_gate_weight = nn.Parameter(torch.zeros(config.vocab_size, config.hidden_size))
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -562,10 +563,9 @@ class LlamaModel(LlamaPreTrainedModel):
         a_t = self.thinking_residual_Lambda(r_t)
         h_residual = self.thinking_residual_head(residual)  # ← 现在训练时也会被调用！
         
-        # 基于 input_ids 获取 token 嵌入，通过线性层变换后应用 sigmoid 控制在 0-1 内
-        # 公式: g_k = sigmoid(linear(embed_tokens(k)))
-        token_embeds = self.embed_tokens(input_ids)
-        g_k = torch.sigmoid(self.token_gate_linear(token_embeds))
+        # 基于 input_ids 直接查表获取门控向量，并应用 sigmoid 控制在 0-1 内
+        # 公式: g_k = sigmoid(lookup(k))
+        g_k = torch.sigmoid(self.token_gate_weight[input_ids])
         
         # 计算连续偏置: continuous_bias = h_residual * g_k
         continuous_bias = h_residual * g_k

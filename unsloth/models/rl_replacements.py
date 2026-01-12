@@ -506,18 +506,20 @@ def grpo_trainer_compute_loss(function_name, function):
         except:
             pass
 
-        # 获取 token_gate_linear 的梯度范数
+        # 获取 token_gate_weight 的梯度范数（通过 named_parameters 查找，兼容 PEFT 包装）
         token_gate_grad_norm = 0.0
         try:
-            base_model = self.model
-            while hasattr(base_model, 'model'):
-                base_model = base_model.model
-            if hasattr(base_model, 'token_gate_linear'):
-                gate_weight = base_model.token_gate_linear.weight
-                if gate_weight.grad is not None:
-                    token_gate_grad_norm = gate_weight.grad.norm().item()
-        except:
-            pass
+            for name, param in self.model.named_parameters():
+                if 'token_gate_weight' in name and param.requires_grad:
+                    if param.grad is not None:
+                        token_gate_grad_norm = param.grad.norm().item()
+                    else:
+                        token_gate_grad_norm = -1.0  # 参数存在且 requires_grad=True 但无梯度
+                    break
+            else:
+                token_gate_grad_norm = -2.0  # 未找到 token_gate_weight 参数
+        except Exception as e:
+            token_gate_grad_norm = -3.0  # 发生异常
 
         if "train" in self._metrics:
             mode = "eval" if self.control.should_evaluate else "train"

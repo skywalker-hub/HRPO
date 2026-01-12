@@ -2344,12 +2344,12 @@ class FastLlamaModel:
                     train_embed_tokens = True
                 elif "thinking_residual" in module:
                     train_thinking_residual = True
-                elif module == "token_gate_linear":
-                    pass  # 允许 token_gate_linear 作为可训练模块
+                elif module == "token_gate_weight":
+                    pass  # 允许 token_gate_weight 作为可训练模块
                 else:
                     raise TypeError(
                         f"Unsloth: Module = {module} is not allowed. Only 'lm_head', 'embed_tokens', "
-                        "'thinking_residual' and 'token_gate_linear' components are allowed."
+                        "'thinking_residual' and 'token_gate_weight' components are allowed."
                     )
             pass
         pass

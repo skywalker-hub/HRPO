@@ -2,7 +2,7 @@ import types
 from transformers.trainer import *
 
 
-def patch_trainer_optimizer(trainer, lr_thinking_residual_gate=1e-4, thinking_residual_Lambda=1e-3, lr_thinking_residual_head=1e-4, lr_token_gate_linear=1e-4):
+def patch_trainer_optimizer(trainer, lr_thinking_residual_gate=1e-4, thinking_residual_Lambda=1e-3, lr_thinking_residual_head=1e-4, lr_token_gate_weight=1e-4):
     def create_optimizer(self):
         """
         Setup the optimizer.
@@ -17,14 +17,14 @@ def patch_trainer_optimizer(trainer, lr_thinking_residual_gate=1e-4, thinking_re
             optimizer_grouped_parameters = [
                 {
                     "params": [
-                        p for n, p in opt_model.named_parameters() if ("thinking_residual" not in n and "token_gate_linear" not in n and n in decay_parameters and p.requires_grad)
+                        p for n, p in opt_model.named_parameters() if ("thinking_residual" not in n and "token_gate_weight" not in n and n in decay_parameters and p.requires_grad)
                     ],
                     "lr": self.args.learning_rate,
                     "weight_decay": self.args.weight_decay,
                 },
                 {
                     "params": [
-                        p for n, p in opt_model.named_parameters() if ("thinking_residual" not in n and "token_gate_linear" not in n and n not in decay_parameters and p.requires_grad)
+                        p for n, p in opt_model.named_parameters() if ("thinking_residual" not in n and "token_gate_weight" not in n and n not in decay_parameters and p.requires_grad)
                     ],
                     "lr": self.args.learning_rate,
                     "weight_decay": 0.0,
@@ -51,12 +51,12 @@ def patch_trainer_optimizer(trainer, lr_thinking_residual_gate=1e-4, thinking_re
                     "lr": lr_thinking_residual_head,
                     "weight_decay": self.args.weight_decay,
                 },
-                # 新增: token_gate_linear 参数组，Token 级门控层
+                # 新增: token_gate_weight 参数组，Token 级门控矩阵
                 {
                     "params": [
-                        p for n, p in opt_model.named_parameters() if ("token_gate_linear" in n and p.requires_grad)
+                        p for n, p in opt_model.named_parameters() if ("token_gate_weight" in n and p.requires_grad)
                     ],
-                    "lr": lr_token_gate_linear,
+                    "lr": lr_token_gate_weight,
                     "weight_decay": self.args.weight_decay,
                 },
             ]
