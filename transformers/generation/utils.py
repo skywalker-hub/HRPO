@@ -3373,7 +3373,8 @@ class GenerationMixin:
             if outputs.hidden_states is not None and len(outputs.hidden_states) > 3:
                 # outputs.hidden_states[3] 是原始隐状态 X，形状 [batch, hidden_size]
                 raw_hidden_states = outputs.hidden_states[3]
-                last_thinking_states = self.model.model.thinking_residual_head(raw_hidden_states)
+                # self 是 Qwen2ForCausalLM，self.model 是 Qwen2Model，thinking_residual_head 在 Qwen2Model 中
+                last_thinking_states = self.model.thinking_residual_head(raw_hidden_states)
             else:
                 # Fallback: 使用原来的概率加权方式
                 last_thinking_states = torch.einsum(
