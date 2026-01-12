@@ -74,7 +74,7 @@ def main(args):
         nn.init.normal_(model.model.model.thinking_residual_head.weight, mean=0.0, std=thinking_residual_head_init_std)
     
     # 初始化 token_gate_weight（0 → sigmoid=0.5，-3 → sigmoid≈0.047）
-    token_gate_init_value = -2.0
+    token_gate_init_value = -1.0
     nn.init.constant_(model.model.model.token_gate_weight.weight, token_gate_init_value)
 
     training_args = GRPOConfig(
