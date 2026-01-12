@@ -3367,16 +3367,11 @@ class GenerationMixin:
             strs = processing_class.batch_decode(input_ids[:, input_len:])
             is_thinking = [self.answer_start not in s for s in strs]
             
-            # 修改: 使用原始隐状态经过 thinking_residual_head 变换得到 last_thinking_states
-            # 原方式: last_thinking_states = einsum(probs, embedding_weight) (概率加权embedding)
-            # 新方式: last_thinking_states = thinking_residual_head(hidden_states) (隐状态变换)
+            # 直接使用原始隐状态，thinking_residual_head 会在 thinking_residual() 函数内被调用
             if outputs.hidden_states is not None and len(outputs.hidden_states) > 3:
-                # outputs.hidden_states[3] 是原始隐状态 X，形状 [batch, hidden_size]
-                raw_hidden_states = outputs.hidden_states[3]
-                # self 是 Qwen2ForCausalLM，self.model 是 Qwen2Model，thinking_residual_head 在 Qwen2Model 中
-                last_thinking_states = self.model.thinking_residual_head(raw_hidden_states)
+                last_thinking_states = outputs.hidden_states[3]  # 原始隐状态 X
             else:
-                # Fallback: 使用原来的概率加权方式
+                # Fallback
                 last_thinking_states = torch.einsum(
                     'bv,vd->bd', probs, self.get_input_embeddings().weight
                 )
