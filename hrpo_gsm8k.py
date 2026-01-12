@@ -67,7 +67,7 @@ def main(args):
     
     # 初始化 token_gate_weight（0 → sigmoid=0.5，-3 → sigmoid≈0.047）
     token_gate_init_value = -2.0
-    nn.init.constant_(model.model.model.token_gate_weight, token_gate_init_value)
+    nn.init.constant_(model.model.model.token_gate_weight.weight, token_gate_init_value)
 
     training_args = GRPOConfig(
         use_vllm = False,

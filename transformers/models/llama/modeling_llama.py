@@ -511,6 +511,17 @@ class ThinkingResidualLambda(nn.Module):
         return a_t
 
 
+class TokenGateWeight(nn.Module):
+    """Token 级门控矩阵，形状 (vocab_size, hidden_size)，通过索引查表"""
+    
+    def __init__(self, config: LlamaConfig):
+        super().__init__()
+        self.weight = nn.Parameter(torch.zeros(config.vocab_size, config.hidden_size))
+    
+    def forward(self, input_ids):
+        return self.weight[input_ids]
+
+
 @add_start_docstrings(
     "The bare LLaMA Model outputting raw hidden-states without any specific head on top.",
     LLAMA_START_DOCSTRING,
@@ -545,8 +556,7 @@ class LlamaModel(LlamaPreTrainedModel):
         
         # 新增：Token 级门控矩阵，形状 (vocab_size, hidden_size)
         # 用于基于离散 token ID 控制连续信息的融合程度
-        # 使用 nn.Parameter 直接定义，通过索引查表
-        self.token_gate_weight = nn.Parameter(torch.zeros(config.vocab_size, config.hidden_size))
+        self.token_gate_weight = TokenGateWeight(config)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -565,7 +575,7 @@ class LlamaModel(LlamaPreTrainedModel):
         
         # 基于 input_ids 直接查表获取门控向量，并应用 sigmoid 控制在 0-1 内
         # 公式: g_k = sigmoid(lookup(k))
-        g_k = torch.sigmoid(self.token_gate_weight[input_ids])
+        g_k = torch.sigmoid(self.token_gate_weight(input_ids))
         
         # 计算连续偏置: continuous_bias = h_residual * g_k
         continuous_bias = h_residual * g_k
