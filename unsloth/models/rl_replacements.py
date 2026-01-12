@@ -506,14 +506,14 @@ def grpo_trainer_compute_loss(function_name, function):
         except:
             pass
 
-        # 获取 token_gate_matrix 的梯度范数
+        # 获取 token_gate_linear 的梯度范数
         token_gate_grad_norm = 0.0
         try:
             base_model = self.model
             while hasattr(base_model, 'model'):
                 base_model = base_model.model
-            if hasattr(base_model, 'token_gate_matrix'):
-                gate_weight = base_model.token_gate_matrix.weight
+            if hasattr(base_model, 'token_gate_linear'):
+                gate_weight = base_model.token_gate_linear.weight
                 if gate_weight.grad is not None:
                     token_gate_grad_norm = gate_weight.grad.norm().item()
         except:
