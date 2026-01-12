@@ -50,6 +50,7 @@ def main(args):
             "thinking_residual_gate_i",
             "thinking_residual_Lambda",
             "thinking_residual_head",  # 新增: 隐状态变换头
+            "token_gate_matrix",       # 新增: Token 级门控矩阵
         ], 
         lora_alpha = args.lora_rank * 2,
         use_gradient_checkpointing = "unsloth",
@@ -63,6 +64,10 @@ def main(args):
     # 这样可以避免随机噪声扰乱模型输出，让模型渐进地学习如何利用隐状态
     import torch.nn as nn
     nn.init.zeros_(model.model.model.thinking_residual_head.weight)
+    
+    # 初始化 token_gate_matrix 为 -3，经过 sigmoid 后约为 0.047，接近关闭状态
+    # 这样可以让模型渐进地学习如何利用 token 级门控
+    model.model.model.reset_token_gate_matrix(init_value=-3.0)
 
     training_args = GRPOConfig(
         use_vllm = False,
@@ -105,7 +110,8 @@ def main(args):
         trainer,
         args.lr_residual_gate,
         args.lr_residual_Lambda,
-        args.lr_residual_head,  # 新增: 隐状态变换头的学习率
+        args.lr_residual_head,           # 新增: 隐状态变换头的学习率
+        args.lr_token_gate_matrix,       # 新增: Token 级门控矩阵的学习率
     )
     trainer.train()
 
@@ -121,6 +127,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr_residual_gate", type=float, default=1e-4)
     parser.add_argument("--lr_residual_Lambda", type=float, default=1e-3)
     parser.add_argument("--lr_residual_head", type=float, default=1e-4)  # 新增: 隐状态变换头的学习率
+    parser.add_argument("--lr_token_gate_matrix", type=float, default=1e-4)  # 新增: Token 级门控矩阵的学习率
     parser.add_argument("--weight_decay", type=float, default=0.1)
     parser.add_argument("--warmup_ratio", type=float, default=0.1)
     parser.add_argument("--lr_scheduler_type", type=str, default="cosine")

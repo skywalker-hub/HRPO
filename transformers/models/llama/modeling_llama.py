@@ -542,6 +542,11 @@ class LlamaModel(LlamaPreTrainedModel):
         
         # 新增：隐状态变换头，将原始隐状态投影到 thinking residual 空间
         self.thinking_residual_head = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
+        
+        # 新增：Token 级门控矩阵，形状 (vocab_size, hidden_size)
+        # 用于基于离散 token ID 控制连续信息的融合程度
+        # 初始化为 -3，经过 sigmoid 后约为 0.047，接近关闭状态
+        self.token_gate_matrix = nn.Embedding(config.vocab_size, config.hidden_size)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -552,12 +557,28 @@ class LlamaModel(LlamaPreTrainedModel):
     def set_input_embeddings(self, value):
         self.embed_tokens = value
 
-    def thinking_residual(self, embeds, residual, eps=1e-8):
+    def reset_token_gate_matrix(self, init_value=-3.0):
+        """
+        重置 token_gate_matrix 的参数为指定值。
+        初始化为 -3，经过 sigmoid 后约为 0.047，接近关闭状态。
+        """
+        with torch.no_grad():
+            nn.init.constant_(self.token_gate_matrix.weight, init_value)
+
+    def thinking_residual(self, embeds, residual, input_ids, eps=1e-8):
         r_t = torch.sigmoid(self.thinking_residual_gate_r(embeds))
-        i_t = torch.sigmoid(self.thinking_residual_gate_i(embeds))
+        i_t = torch.sigmoid(self.thinking_residual_gate_i(embeds))  # 保留定义，暂不使用
         a_t = self.thinking_residual_Lambda(r_t)
         h_residual = self.thinking_residual_head(residual)  # ← 现在训练时也会被调用！
-        return a_t * embeds + torch.sqrt(1 - a_t.pow(2) + eps) * (i_t * h_residual), a_t
+        
+        # 基于 input_ids 查找 token 级门控向量，并应用 sigmoid 控制在 0-1 内
+        # 公式: g_k = sigmoid(lookup(k))
+        g_k = torch.sigmoid(self.token_gate_matrix(input_ids))
+        
+        # 计算连续偏置: continuous_bias = h_residual * g_k
+        continuous_bias = h_residual * g_k
+        
+        return a_t * embeds + torch.sqrt(1 - a_t.pow(2) + eps) * continuous_bias, a_t
 
     @add_start_docstrings_to_model_forward(LLAMA_INPUTS_DOCSTRING)
     def forward(

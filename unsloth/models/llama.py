@@ -665,6 +665,7 @@ def LlamaModel_fast_forward(
         new_inputs_embeds = inputs_embeds.clone()
         new_inputs_embeds[thinking_mask] = self.thinking_residual(
             inputs_embeds[thinking_mask], thinking_embeds[thinking_mask],
+            input_ids[thinking_mask],
         )[0].to(inputs_embeds.dtype)
         inputs_embeds = new_inputs_embeds
 
@@ -943,6 +944,7 @@ def LlamaModel_fast_forward_inference(
         thinking_embeds = last_thinking_states
         X_hat, a_t = self.model.thinking_residual(
             X, last_thinking_states.unsqueeze(1),
+            input_ids,
         )
         embeds_ratio = a_t.mean(-1).squeeze()
         embeds_ratio[~torch.tensor(is_thinking)] = 1.
