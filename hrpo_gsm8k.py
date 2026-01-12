@@ -66,7 +66,7 @@ def main(args):
     nn.init.zeros_(model.model.model.thinking_residual_head.weight)
     
     # 初始化 token_gate_linear 权重（0 → sigmoid=0.5，-3 → sigmoid≈0.047）
-    token_gate_init_value = 0.0
+    token_gate_init_value = -2.0
     nn.init.constant_(model.model.model.token_gate_linear.weight, token_gate_init_value)
 
     training_args = GRPOConfig(
