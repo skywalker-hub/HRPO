@@ -3366,10 +3366,20 @@ class GenerationMixin:
 
             strs = processing_class.batch_decode(input_ids[:, input_len:])
             is_thinking = [self.answer_start not in s for s in strs]
-            last_thinking_states = torch.einsum(
-                'bv,vd->bd', probs, self.get_input_embeddings().weight
-            )
-            last_thinking_states /= torch.sqrt((probs ** 2).sum(-1, keepdim=True)).to(last_thinking_states.dtype)
+            
+            # 修改: 使用原始隐状态经过 thinking_residual_head 变换得到 last_thinking_states
+            # 原方式: last_thinking_states = einsum(probs, embedding_weight) (概率加权embedding)
+            # 新方式: last_thinking_states = thinking_residual_head(hidden_states) (隐状态变换)
+            if outputs.hidden_states is not None and len(outputs.hidden_states) > 3:
+                # outputs.hidden_states[3] 是原始隐状态 X，形状 [batch, hidden_size]
+                raw_hidden_states = outputs.hidden_states[3]
+                last_thinking_states = self.model.model.thinking_residual_head(raw_hidden_states)
+            else:
+                # Fallback: 使用原来的概率加权方式
+                last_thinking_states = torch.einsum(
+                    'bv,vd->bd', probs, self.get_input_embeddings().weight
+                )
+                last_thinking_states /= torch.sqrt((probs ** 2).sum(-1, keepdim=True)).to(last_thinking_states.dtype)
 
             if return_thinking_embeds and outputs.hidden_states is not None:
                 thinking_embeds.append(outputs.hidden_states[0].unsqueeze(1))

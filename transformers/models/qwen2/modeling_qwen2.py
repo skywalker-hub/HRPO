@@ -517,6 +517,13 @@ class Qwen2Model(Qwen2PreTrainedModel):
         self.thinking_residual_gate_r = nn.Linear(config.hidden_size, config.hidden_size)
         self.thinking_residual_gate_i = nn.Linear(config.hidden_size, config.hidden_size)
         self.thinking_residual_Lambda = ThinkingResidualLambda(config)
+        
+        # 新增：隐状态变换头，将原始隐状态投影到 thinking residual 空间
+        # 形状选择说明：
+        #   - (hidden_size, hidden_size): 保持维度，最大表达能力
+        #   - (hidden_size, hidden_size // 2): 降维，减少参数量
+        #   - (hidden_size, hidden_size // 4): 更激进降维
+        self.thinking_residual_head = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
 
         # Initialize weights and apply final processing
         self.post_init()

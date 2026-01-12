@@ -2,7 +2,7 @@ import types
 from transformers.trainer import *
 
 
-def patch_trainer_optimizer(trainer, lr_thinking_residual_gate=1e-4, thinking_residual_Lambda=1e-3):
+def patch_trainer_optimizer(trainer, lr_thinking_residual_gate=1e-4, thinking_residual_Lambda=1e-3, lr_thinking_residual_head=1e-4):
     def create_optimizer(self):
         """
         Setup the optimizer.
@@ -41,6 +41,14 @@ def patch_trainer_optimizer(trainer, lr_thinking_residual_gate=1e-4, thinking_re
                         p for n, p in opt_model.named_parameters() if ("thinking_residual_Lambda" in n and p.requires_grad)
                     ],
                     "lr": thinking_residual_Lambda,
+                    "weight_decay": self.args.weight_decay,
+                },
+                # 新增: thinking_residual_head 参数组，学习率与门控矩阵相同
+                {
+                    "params": [
+                        p for n, p in opt_model.named_parameters() if ("thinking_residual_head" in n and p.requires_grad)
+                    ],
+                    "lr": lr_thinking_residual_head,
                     "weight_decay": self.args.weight_decay,
                 },
             ]

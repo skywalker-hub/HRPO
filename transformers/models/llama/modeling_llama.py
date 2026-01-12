@@ -539,6 +539,9 @@ class LlamaModel(LlamaPreTrainedModel):
         self.thinking_residual_gate_r = nn.Linear(config.hidden_size, config.hidden_size)
         self.thinking_residual_gate_i = nn.Linear(config.hidden_size, config.hidden_size)
         self.thinking_residual_Lambda = ThinkingResidualLambda(config)
+        
+        # 新增：隐状态变换头，将原始隐状态投影到 thinking residual 空间
+        self.thinking_residual_head = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
 
         # Initialize weights and apply final processing
         self.post_init()
