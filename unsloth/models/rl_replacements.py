@@ -501,6 +501,10 @@ def grpo_trainer_compute_loss(function_name, function):
         token_gate_weight_absmax = 0.0
         token_gate_grad_absmax = 0.0
         token_gate_requires_grad = False
+        token_gate_init_mean = 0.0
+        token_gate_global_mean_delta = 0.0
+        token_gate_hit_max_abs_delta = 0.0
+        token_gate_hit_mean_abs_delta = 0.0
 
         def _get_weight_tensor(module):
             """
@@ -573,6 +577,30 @@ def grpo_trainer_compute_loss(function_name, function):
                     token_gate_requires_grad = bool(getattr(_w, "requires_grad", False))
                     if getattr(_w, "grad", None) is not None:
                         token_gate_grad_absmax = _w.grad.detach().abs().max().item()
+
+                    # 记录 token_gate 的“初始均值”(首个 step 作为基线)，并统计 delta
+                    if not hasattr(self, "_token_gate_init_mean"):
+                        # 你这里通常是常数初始化（-2 / -1），用 mean 作为 init value 最稳且不占显存
+                        self._token_gate_init_mean = float(_w.detach().float().mean().item())
+                    token_gate_init_mean = float(getattr(self, "_token_gate_init_mean", 0.0))
+
+                    # 全局均值偏移（非常粗，但能看是否整体漂移）
+                    token_gate_global_mean_delta = float(_w.detach().float().mean().item() - token_gate_init_mean)
+
+                    # 命中 token 行的 delta（最关键：查表参数只会更新这些行）
+                    try:
+                        # input_ids 是 completion 部分 (B, Lc)
+                        # 取 unique 并截断，避免 vocab 很大导致开销过大
+                        hit_ids = torch.unique(input_ids.detach().reshape(-1))
+                        max_rows = 2048
+                        if hit_ids.numel() > max_rows:
+                            hit_ids = hit_ids[:max_rows]
+                        hit_rows = _w.detach().index_select(0, hit_ids).float()
+                        hit_delta = (hit_rows - token_gate_init_mean).abs()
+                        token_gate_hit_max_abs_delta = float(hit_delta.max().item()) if hit_delta.numel() else 0.0
+                        token_gate_hit_mean_abs_delta = float(hit_delta.mean().item()) if hit_delta.numel() else 0.0
+                    except Exception:
+                        pass
                 except Exception:
                     pass
 
@@ -588,6 +616,10 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics[mode]["token_gate_weight_absmax"].append(token_gate_weight_absmax)
             self._metrics[mode]["token_gate_grad_absmax"].append(token_gate_grad_absmax)
             self._metrics[mode]["token_gate_requires_grad"].append(float(token_gate_requires_grad))
+            self._metrics[mode]["token_gate_init_mean"].append(token_gate_init_mean)
+            self._metrics[mode]["token_gate_global_mean_delta"].append(token_gate_global_mean_delta)
+            self._metrics[mode]["token_gate_hit_max_abs_delta"].append(token_gate_hit_max_abs_delta)
+            self._metrics[mode]["token_gate_hit_mean_abs_delta"].append(token_gate_hit_mean_abs_delta)
         else:
             self._metrics["embeds_ratio"].append(mean_embeds_ratio.item())
             self._metrics["hidden_ratio"].append(mean_hidden_ratio.item())
@@ -599,6 +631,10 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics["token_gate_weight_absmax"].append(token_gate_weight_absmax)
             self._metrics["token_gate_grad_absmax"].append(token_gate_grad_absmax)
             self._metrics["token_gate_requires_grad"].append(float(token_gate_requires_grad))
+            self._metrics["token_gate_init_mean"].append(token_gate_init_mean)
+            self._metrics["token_gate_global_mean_delta"].append(token_gate_global_mean_delta)
+            self._metrics["token_gate_hit_max_abs_delta"].append(token_gate_hit_max_abs_delta)
+            self._metrics["token_gate_hit_mean_abs_delta"].append(token_gate_hit_mean_abs_delta)
         return loss
     pass
 
