@@ -493,38 +493,25 @@ def grpo_trainer_compute_loss(function_name, function):
         mean_embeds_ratio = embeds_ratio[embeds_ratio_mask].mean()
         mean_hidden_ratio = torch.sqrt(1 - embeds_ratio[embeds_ratio_mask] ** 2).mean()
 
-        # 获取 thinking_residual_head 的梯度范数
+        # 获取 thinking_residual_head 和 token_gate_weight 的梯度范数
         new_head_norm = 0.0
-        try:
-            base_model = self.model
-            while hasattr(base_model, 'model'):
-                base_model = base_model.model
-            if hasattr(base_model, 'thinking_residual_head'):
-                head_weight = base_model.thinking_residual_head.weight
-                if head_weight.grad is not None:
-                    new_head_norm = head_weight.grad.norm().item()
-        except:
-            pass
-
-        # 获取 token_gate_weight 的梯度范数（和 thinking_residual_head 一样的方式）
-        # 调试: -1=无属性, -2=无weight, -3=requires_grad=False, -4=grad=None, >=0=正常
         token_gate_grad_norm = 0.0
         try:
             base_model = self.model
             while hasattr(base_model, 'model'):
                 base_model = base_model.model
-            if not hasattr(base_model, 'token_gate_weight'):
-                token_gate_grad_norm = -1.0
-            elif not hasattr(base_model.token_gate_weight, 'weight'):
-                token_gate_grad_norm = -2.0
-            elif not base_model.token_gate_weight.weight.requires_grad:
-                token_gate_grad_norm = -3.0
-            elif base_model.token_gate_weight.weight.grad is None:
-                token_gate_grad_norm = -4.0
-            else:
-                token_gate_grad_norm = base_model.token_gate_weight.weight.grad.norm().item()
-        except Exception as e:
-            token_gate_grad_norm = -5.0
+            # thinking_residual_head
+            if hasattr(base_model, 'thinking_residual_head'):
+                head_weight = base_model.thinking_residual_head.weight
+                if head_weight.grad is not None:
+                    new_head_norm = head_weight.grad.norm().item()
+            # token_gate_weight（和 thinking_residual_head 同级）
+            if hasattr(base_model, 'token_gate_weight'):
+                gate_weight = base_model.token_gate_weight.weight
+                if gate_weight.grad is not None:
+                    token_gate_grad_norm = gate_weight.grad.norm().item()
+        except:
+            pass
 
         if "train" in self._metrics:
             mode = "eval" if self.control.should_evaluate else "train"
