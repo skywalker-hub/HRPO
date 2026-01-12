@@ -58,6 +58,11 @@ def main(args):
     model.model.model.thinking_residual_Lambda.reset_lambda_parameters(
         r_min = args.residual_r_min, r_max = args.residual_r_max,
     )
+    
+    # 零初始化 thinking_residual_head，让训练初期 h_residual=0，模型行为与原来一致
+    # 这样可以避免随机噪声扰乱模型输出，让模型渐进地学习如何利用隐状态
+    import torch.nn as nn
+    nn.init.zeros_(model.model.model.thinking_residual_head.weight)
 
     training_args = GRPOConfig(
         use_vllm = False,
