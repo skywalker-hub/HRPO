@@ -498,6 +498,12 @@ def grpo_trainer_compute_loss(function_name, function):
         new_head_norm = 0.0
         token_gate_grad_norm = 0.0
         new_head_weight_absmax = 0.0
+        gate_r_grad_norm = 0.0
+        gate_r_weight_absmax = 0.0
+        gate_r_grad_absmax = 0.0
+        gate_r_init_mean = 0.0
+        gate_r_global_mean_delta = 0.0
+        gate_r_global_mean_abs_delta = 0.0
         token_gate_weight_absmax = 0.0
         token_gate_grad_absmax = 0.0
         token_gate_requires_grad = False
@@ -568,6 +574,25 @@ def grpo_trainer_compute_loss(function_name, function):
                 except Exception:
                     pass
 
+        # 对照：thinking_residual_gate_r（已知在训练的线性层）
+        if base_model is not None and hasattr(base_model, "thinking_residual_gate_r"):
+            gate_r_grad_norm = _get_weight_grad_norm(base_model.thinking_residual_gate_r)
+            _w = _get_weight_tensor(base_model.thinking_residual_gate_r)
+            if _w is not None:
+                try:
+                    gate_r_weight_absmax = _w.detach().abs().max().item()
+                    if getattr(_w, "grad", None) is not None:
+                        gate_r_grad_absmax = _w.grad.detach().abs().max().item()
+
+                    # 记录 gate_r 的“初始均值”(首个 step 作为基线)，并统计 delta
+                    if not hasattr(self, "_gate_r_init_mean"):
+                        self._gate_r_init_mean = float(_w.detach().float().mean().item())
+                    gate_r_init_mean = float(getattr(self, "_gate_r_init_mean", 0.0))
+                    gate_r_global_mean_delta = float(_w.detach().float().mean().item() - gate_r_init_mean)
+                    gate_r_global_mean_abs_delta = float((_w.detach().float() - gate_r_init_mean).abs().mean().item())
+                except Exception:
+                    pass
+
         if base_model is not None and hasattr(base_model, "token_gate_weight"):
             token_gate_grad_norm = _get_weight_grad_norm(base_model.token_gate_weight)
             _w = _get_weight_tensor(base_model.token_gate_weight)
@@ -613,6 +638,12 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics[mode]["new_head_norm"].append(new_head_norm)
             self._metrics[mode]["token_gate_grad_norm"].append(token_gate_grad_norm)
             self._metrics[mode]["new_head_weight_absmax"].append(new_head_weight_absmax)
+            self._metrics[mode]["gate_r_grad_norm"].append(gate_r_grad_norm)
+            self._metrics[mode]["gate_r_weight_absmax"].append(gate_r_weight_absmax)
+            self._metrics[mode]["gate_r_grad_absmax"].append(gate_r_grad_absmax)
+            self._metrics[mode]["gate_r_init_mean"].append(gate_r_init_mean)
+            self._metrics[mode]["gate_r_global_mean_delta"].append(gate_r_global_mean_delta)
+            self._metrics[mode]["gate_r_global_mean_abs_delta"].append(gate_r_global_mean_abs_delta)
             self._metrics[mode]["token_gate_weight_absmax"].append(token_gate_weight_absmax)
             self._metrics[mode]["token_gate_grad_absmax"].append(token_gate_grad_absmax)
             self._metrics[mode]["token_gate_requires_grad"].append(float(token_gate_requires_grad))
@@ -628,6 +659,12 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics["new_head_norm"].append(new_head_norm)
             self._metrics["token_gate_grad_norm"].append(token_gate_grad_norm)
             self._metrics["new_head_weight_absmax"].append(new_head_weight_absmax)
+            self._metrics["gate_r_grad_norm"].append(gate_r_grad_norm)
+            self._metrics["gate_r_weight_absmax"].append(gate_r_weight_absmax)
+            self._metrics["gate_r_grad_absmax"].append(gate_r_grad_absmax)
+            self._metrics["gate_r_init_mean"].append(gate_r_init_mean)
+            self._metrics["gate_r_global_mean_delta"].append(gate_r_global_mean_delta)
+            self._metrics["gate_r_global_mean_abs_delta"].append(gate_r_global_mean_abs_delta)
             self._metrics["token_gate_weight_absmax"].append(token_gate_weight_absmax)
             self._metrics["token_gate_grad_absmax"].append(token_gate_grad_absmax)
             self._metrics["token_gate_requires_grad"].append(float(token_gate_requires_grad))
