@@ -3369,7 +3369,13 @@ class GenerationMixin:
             
             # 直接使用原始隐状态，thinking_residual_head 会在 thinking_residual() 函数内被调用
             if outputs.hidden_states is not None and len(outputs.hidden_states) > 3:
-                last_thinking_states = outputs.hidden_states[3]  # 原始隐状态 X
+                hs = outputs.hidden_states[3]  # 原始隐状态 X
+                # prefill 阶段返回的是标准 hidden_states 元组，形状为 [batch, seq_len, hidden]
+                # 推理阶段返回的是自定义列表，形状为 [batch, hidden]
+                if hs.dim() == 3:  # prefill 阶段
+                    last_thinking_states = hs[:, -1, :]  # 只取最后一个 token
+                else:  # 推理阶段
+                    last_thinking_states = hs
             else:
                 # Fallback
                 last_thinking_states = torch.einsum(
