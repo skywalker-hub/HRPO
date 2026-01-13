@@ -493,7 +493,7 @@ def grpo_trainer_compute_loss(function_name, function):
         mean_embeds_ratio = embeds_ratio[embeds_ratio_mask].mean()
         mean_hidden_ratio = torch.sqrt(1 - embeds_ratio[embeds_ratio_mask] ** 2).mean()
 
-        # 获取 thinking_residual_head 和 token_gate_weight 的梯度范数 & 诊断信息
+        # 获取 thinking_residual_head 和 token_gate_linear 的梯度范数 & 诊断信息
         # 注意：这里是在下一 step 的 compute_loss 里读取“上一 step 的 grad”（取决于 zero_grad 的时机）。
         new_head_norm = 0.0
         token_gate_grad_norm = 0.0
@@ -593,9 +593,9 @@ def grpo_trainer_compute_loss(function_name, function):
                 except Exception:
                     pass
 
-        if base_model is not None and hasattr(base_model, "token_gate_weight"):
-            token_gate_grad_norm = _get_weight_grad_norm(base_model.token_gate_weight)
-            _w = _get_weight_tensor(base_model.token_gate_weight)
+        if base_model is not None and hasattr(base_model, "token_gate_linear"):
+            token_gate_grad_norm = _get_weight_grad_norm(base_model.token_gate_linear)
+            _w = _get_weight_tensor(base_model.token_gate_linear)
             if _w is not None:
                 try:
                     token_gate_weight_absmax = _w.detach().abs().max().item()

@@ -50,7 +50,7 @@ def main(args):
             "thinking_residual_gate_i",
             "thinking_residual_Lambda",
             "thinking_residual_head",  # 新增: 隐状态变换头
-            "token_gate_weight",       # 新增: Token 级门控矩阵
+            "token_gate_linear",       # 新增: Token 级门控矩阵（Linear 存权重）
         ], 
         lora_alpha = args.lora_rank * 2,
         use_gradient_checkpointing = "unsloth",
@@ -65,7 +65,7 @@ def main(args):
     import torch.nn as nn
     # 初始化 thinking_residual_head：
     # - std=0.0  -> 全 0（保持你当前默认行为）
-    # - std>0.0  -> 极小正态随机（可让 token_gate_weight 从 step0 就有梯度）
+    # - std>0.0  -> 极小正态随机（可让 token_gate_linear 从 step0 就有梯度）
     thinking_residual_head_init_std = 0.0001
 
     if thinking_residual_head_init_std == 0.0:
@@ -73,9 +73,9 @@ def main(args):
     else:
         nn.init.normal_(model.model.model.thinking_residual_head.weight, mean=0.0, std=thinking_residual_head_init_std)
     
-    # 初始化 token_gate_weight（0 → sigmoid=0.5，-3 → sigmoid≈0.047）
+    # 初始化 token_gate_linear（0 → sigmoid=0.5，-3 → sigmoid≈0.047）
     token_gate_init_value = -1.0
-    nn.init.constant_(model.model.model.token_gate_weight.weight, token_gate_init_value)
+    nn.init.constant_(model.model.model.token_gate_linear.weight, token_gate_init_value)
 
     training_args = GRPOConfig(
         use_vllm = False,

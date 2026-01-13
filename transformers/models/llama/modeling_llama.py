@@ -556,7 +556,7 @@ class LlamaModel(LlamaPreTrainedModel):
         
         # 新增：Token 级门控矩阵，形状 (vocab_size, hidden_size)
         # 用于基于离散 token ID 控制连续信息的融合程度
-        self.token_gate_weight = TokenGateWeight(config)
+        self.token_gate_linear = nn.Linear(config.vocab_size, config.hidden_size, bias=False)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -567,6 +567,25 @@ class LlamaModel(LlamaPreTrainedModel):
     def set_input_embeddings(self, value):
         self.embed_tokens = value
 
+    def _token_gate_one_hot_mm(self, input_ids: torch.LongTensor) -> torch.Tensor:
+        ids = input_ids.reshape(-1).to(torch.long)
+        n = ids.numel()
+        hidden_size = self.token_gate_linear.weight.shape[0]
+        if n == 0:
+            return self.token_gate_linear.weight.new_empty((*input_ids.shape, hidden_size))
+
+        vocab_size = self.token_gate_linear.weight.shape[1]
+        device = ids.device
+        rows = torch.arange(n, device=device, dtype=torch.long)
+        cols = ids
+        indices = torch.stack([rows, cols], dim=0)
+        values = torch.ones(n, device=device, dtype=torch.float32)
+        one_hot = torch.sparse_coo_tensor(indices, values, size=(n, vocab_size)).coalesce()
+
+        W_vh = self.token_gate_linear.weight.T
+        out = torch.sparse.mm(one_hot, W_vh.float()).to(self.token_gate_linear.weight.dtype)
+        return out.view(*input_ids.shape, hidden_size)
+
     def thinking_residual(self, embeds, residual, input_ids, eps=1e-8):
         r_t = torch.sigmoid(self.thinking_residual_gate_r(embeds))
         i_t = torch.sigmoid(self.thinking_residual_gate_i(embeds))  # 保留定义，暂不使用
@@ -575,7 +594,7 @@ class LlamaModel(LlamaPreTrainedModel):
         
         # 基于 input_ids 直接查表获取门控向量，并应用 sigmoid 控制在 0-1 内
         # 公式: g_k = sigmoid(lookup(k))
-        g_k = torch.sigmoid(self.token_gate_weight(input_ids))
+        g_k = torch.sigmoid(self._token_gate_one_hot_mm(input_ids))
         
         # 计算连续偏置: continuous_bias = h_residual * g_k
         continuous_bias = h_residual * g_k
