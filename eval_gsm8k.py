@@ -91,6 +91,7 @@ def evaluate_model(
                 do_sample=True,  # for temperature, top-k, etc.
                 temperature=temperature,
                 max_new_tokens=512,
+                output_hidden_states=True,
             ),
             processing_class=tokenizer,
             is_inference=is_inference,
