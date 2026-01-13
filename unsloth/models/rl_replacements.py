@@ -511,6 +511,8 @@ def grpo_trainer_compute_loss(function_name, function):
         token_gate_global_mean_delta = 0.0
         token_gate_hit_max_abs_delta = 0.0
         token_gate_hit_mean_abs_delta = 0.0
+        token_gate_sample_max_abs_delta = 0.0
+        token_gate_sample_mean_abs_delta = 0.0
 
         def _get_weight_tensor(module):
             """
@@ -620,10 +622,39 @@ def grpo_trainer_compute_loss(function_name, function):
                         max_rows = 2048
                         if hit_ids.numel() > max_rows:
                             hit_ids = hit_ids[:max_rows]
-                        hit_rows = _w.detach().index_select(0, hit_ids).float()
-                        hit_delta = (hit_rows - token_gate_init_mean).abs()
+                        w_detached = _w.detach()
+                        # token_gate_linear.weight 形状通常是 (H, V)，token id 对应的是列维度 (dim=1)
+                        if w_detached.dim() == 2 and w_detached.shape[1] >= int(hit_ids.max().item() if hit_ids.numel() else 0) + 1:
+                            hit_cols = w_detached.index_select(1, hit_ids).float()  # (H, n_hit)
+                            hit_delta = (hit_cols - token_gate_init_mean).abs()
+                        else:
+                            # 兼容旧的 (V, H) 查表实现：按行取
+                            hit_rows = w_detached.index_select(0, hit_ids).float()
+                            hit_delta = (hit_rows - token_gate_init_mean).abs()
                         token_gate_hit_max_abs_delta = float(hit_delta.max().item()) if hit_delta.numel() else 0.0
                         token_gate_hit_mean_abs_delta = float(hit_delta.mean().item()) if hit_delta.numel() else 0.0
+                    except Exception:
+                        pass
+
+                    # 更稳的“是否更新”指标：固定抽样若干权重元素，跟初始值做 delta（不依赖维度含义）
+                    try:
+                        if not hasattr(self, "_token_gate_sample_idx"):
+                            numel = int(_w.numel())
+                            k = 1024 if numel > 1024 else numel
+                            if k > 0:
+                                gen = torch.Generator(device=_w.device)
+                                gen.manual_seed(1)
+                                idx = torch.randperm(numel, generator=gen, device=_w.device)[:k]
+                                self._token_gate_sample_idx = idx
+                                self._token_gate_sample_init = _w.detach().float().view(-1).index_select(0, idx)
+
+                        idx = getattr(self, "_token_gate_sample_idx", None)
+                        init = getattr(self, "_token_gate_sample_init", None)
+                        if idx is not None and init is not None:
+                            cur = _w.detach().float().view(-1).index_select(0, idx)
+                            d = (cur - init).abs()
+                            token_gate_sample_max_abs_delta = float(d.max().item()) if d.numel() else 0.0
+                            token_gate_sample_mean_abs_delta = float(d.mean().item()) if d.numel() else 0.0
                     except Exception:
                         pass
                 except Exception:
@@ -651,6 +682,8 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics[mode]["token_gate_global_mean_delta"].append(token_gate_global_mean_delta)
             self._metrics[mode]["token_gate_hit_max_abs_delta"].append(token_gate_hit_max_abs_delta)
             self._metrics[mode]["token_gate_hit_mean_abs_delta"].append(token_gate_hit_mean_abs_delta)
+            self._metrics[mode]["token_gate_sample_max_abs_delta"].append(token_gate_sample_max_abs_delta)
+            self._metrics[mode]["token_gate_sample_mean_abs_delta"].append(token_gate_sample_mean_abs_delta)
         else:
             self._metrics["embeds_ratio"].append(mean_embeds_ratio.item())
             self._metrics["hidden_ratio"].append(mean_hidden_ratio.item())
@@ -672,6 +705,8 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics["token_gate_global_mean_delta"].append(token_gate_global_mean_delta)
             self._metrics["token_gate_hit_max_abs_delta"].append(token_gate_hit_max_abs_delta)
             self._metrics["token_gate_hit_mean_abs_delta"].append(token_gate_hit_mean_abs_delta)
+            self._metrics["token_gate_sample_max_abs_delta"].append(token_gate_sample_max_abs_delta)
+            self._metrics["token_gate_sample_mean_abs_delta"].append(token_gate_sample_mean_abs_delta)
         return loss
     pass
 
