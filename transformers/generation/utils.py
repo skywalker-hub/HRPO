@@ -3376,7 +3376,7 @@ class GenerationMixin:
                     last_thinking_states = hs[:, -1, :]  # 只取最后一个 token
                 else:  # 推理阶段
                     last_thinking_states = hs
-            else:
+            else:################### HRPO的隐藏状态计算
                 # Fallback
                 last_thinking_states = torch.einsum(
                     'bv,vd->bd', probs, self.get_input_embeddings().weight
