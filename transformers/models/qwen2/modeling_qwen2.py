@@ -553,9 +553,14 @@ class Qwen2Model(Qwen2PreTrainedModel):
 
     def _token_gate_one_hot_mm(self, input_ids: torch.LongTensor) -> torch.Tensor:
         """
-        通过稀疏 one-hot + sparse.mm 计算：
+        数学形式等价于：
             one_hot(input_ids) @ W_vocab_hidden
         其中 W_vocab_hidden == self.token_gate_linear.weight.T
+
+        但：CUDA 上 sparse.mm 对 bf16 不完整（你遇到的 addmm_sparse_cuda 报错）。
+        所以这里用“等价的列选择”实现 one-hot 乘法（不会构造巨大的 one-hot，也不会触发 sparse.mm）：
+            one_hot(ids) @ W == W[ids]
+        对应到 Linear 的权重 (H, V)：取列并转置即可。
 
         返回形状: (*input_ids.shape, hidden_size)
         """
@@ -565,18 +570,9 @@ class Qwen2Model(Qwen2PreTrainedModel):
         if n == 0:
             return self.token_gate_linear.weight.new_empty((*input_ids.shape, hidden_size))
 
-        vocab_size = self.token_gate_linear.weight.shape[1]
-        device = ids.device
-
-        rows = torch.arange(n, device=device, dtype=torch.long)
-        cols = ids
-        indices = torch.stack([rows, cols], dim=0)
-        values = torch.ones(n, device=device, dtype=torch.float32)
-        one_hot = torch.sparse_coo_tensor(indices, values, size=(n, vocab_size)).coalesce()
-
-        # (N, V) @ (V, H) -> (N, H)
-        W_vh = self.token_gate_linear.weight.T
-        out = torch.sparse.mm(one_hot, W_vh.float()).to(self.token_gate_linear.weight.dtype)
+        # weight: (H, V) -> select columns by ids -> (H, N) -> transpose -> (N, H)
+        cols = self.token_gate_linear.weight.index_select(1, ids)
+        out = cols.transpose(0, 1)
         return out.view(*input_ids.shape, hidden_size)
 
     def thinking_residual(self, embeds, residual, input_ids, eps=1e-8):

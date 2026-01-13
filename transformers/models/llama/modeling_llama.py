@@ -568,22 +568,18 @@ class LlamaModel(LlamaPreTrainedModel):
         self.embed_tokens = value
 
     def _token_gate_one_hot_mm(self, input_ids: torch.LongTensor) -> torch.Tensor:
+        """
+        等价于 one_hot(input_ids) @ self.token_gate_linear.weight.T，但不使用 sparse.mm（bf16 下不完整）。
+        实现方式：直接按 token id 选择 Linear 权重的列。
+        """
         ids = input_ids.reshape(-1).to(torch.long)
         n = ids.numel()
         hidden_size = self.token_gate_linear.weight.shape[0]
         if n == 0:
             return self.token_gate_linear.weight.new_empty((*input_ids.shape, hidden_size))
 
-        vocab_size = self.token_gate_linear.weight.shape[1]
-        device = ids.device
-        rows = torch.arange(n, device=device, dtype=torch.long)
-        cols = ids
-        indices = torch.stack([rows, cols], dim=0)
-        values = torch.ones(n, device=device, dtype=torch.float32)
-        one_hot = torch.sparse_coo_tensor(indices, values, size=(n, vocab_size)).coalesce()
-
-        W_vh = self.token_gate_linear.weight.T
-        out = torch.sparse.mm(one_hot, W_vh.float()).to(self.token_gate_linear.weight.dtype)
+        cols = self.token_gate_linear.weight.index_select(1, ids)  # (H, N)
+        out = cols.transpose(0, 1)  # (N, H)
         return out.view(*input_ids.shape, hidden_size)
 
     def thinking_residual(self, embeds, residual, input_ids, eps=1e-8):
