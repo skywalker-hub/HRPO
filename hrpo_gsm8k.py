@@ -146,3 +146,5 @@ if __name__ == "__main__":
     # "meta-llama/Llama-3.2-3B-Instruct"
 
     main(args)
+
+    ###日志：本代码仅对HRPO的h做了替换，加入了一个线性头训练。
