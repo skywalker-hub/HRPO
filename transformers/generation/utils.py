@@ -2324,7 +2324,7 @@ class GenerationMixin:
                 is_encoder_decoder=self.config.is_encoder_decoder,
                 **model_kwargs,
             )
-
+            #####主断点3:
             # 12. run sample (it degenerates to greedy search when `generation_config.do_sample=False`)
             result = self._sample(
                 input_ids,
@@ -3195,6 +3195,8 @@ class GenerationMixin:
         else:
             return input_ids
 
+
+################################################################采样
     def _sample(
         self,
         input_ids: torch.LongTensor,
@@ -3292,6 +3294,10 @@ class GenerationMixin:
         embeds_ratio = [
             torch.ones_like(input_ids, dtype=torch.float32, device=input_ids.device)
         ] if return_thinking_embeds else []
+
+
+        #####主断点5:
+################################################################################################前向主循环：1层
         while self._has_unfinished_sequences(this_peer_finished, synced_gpus, device=input_ids.device):
             # prepare model inputs
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
@@ -3300,6 +3306,7 @@ class GenerationMixin:
             model_inputs.update({"output_attentions": output_attentions} if output_attentions else {})
             model_inputs.update({"output_hidden_states": output_hidden_states} if output_hidden_states else {})
 
+            #####主断点6:
             # prepare is_thinking and last_thinking_states for latent reasoning
             model_inputs.update({"is_thinking": is_thinking} if is_thinking is not None else {})
             model_inputs.update({"last_thinking_states": last_thinking_states} if last_thinking_states is not None else {})
@@ -3399,7 +3406,9 @@ class GenerationMixin:
             # This is needed to properly delete outputs.logits which may be very large for first iteration
             # Otherwise a reference to outputs is kept which keeps the logits alive in the next iteration
             del outputs
-
+####################################################################################################前向主循环：1层结束
+        
+        
         if streamer is not None:
             streamer.end()
 
