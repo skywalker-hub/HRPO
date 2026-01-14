@@ -1,7 +1,49 @@
+import os
+import subprocess
+
+# ---------------------------------------------------------------------------
+# Bootstrap environment *before* importing datasets / huggingface_hub.
+#
+# In PyCharm remote debug, the Python process often does NOT inherit:
+#   source env.sh
+#   export HF_ENDPOINT=https://hf-mirror.com
+#
+# Also, huggingface_hub reads HF_ENDPOINT at import time (cached constants),
+# so setting os.environ["HF_ENDPOINT"] later may not affect requests.
+# ---------------------------------------------------------------------------
+
+def _source_env_sh_into_process(env_sh_path: str) -> None:
+    """Load `export VAR=...` from env.sh into current os.environ (best-effort)."""
+    if not os.path.exists(env_sh_path):
+        return
+    cmd = f'set -a && source "{env_sh_path}" >/dev/null 2>&1 && env -0'
+    out = subprocess.check_output(["bash", "-lc", cmd])
+    for item in out.split(b"\x00"):
+        if not item:
+            continue
+        k, _, v = item.partition(b"=")
+        if k:
+            os.environ[k.decode("utf-8", errors="ignore")] = v.decode("utf-8", errors="ignore")
+
+
+# 1) Emulate: source env.sh (in current Python process)
+_source_env_sh_into_process(os.path.join(os.path.dirname(__file__), "env.sh"))
+
+# 2) Emulate: export HF_ENDPOINT=https://hf-mirror.com
+# Prefer externally provided value; otherwise default to mirror.
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+# Some environments/tools use this name; harmless if unused.
+os.environ.setdefault("HF_HUB_ENDPOINT", os.environ["HF_ENDPOINT"])
+
+# 3) Pin caches so debug + CLI share the same dataset cache
+_cache_root = os.environ.get("HF_CACHE_DIR", "/root/autodl-tmp/hf_cache")
+os.environ.setdefault("HF_HOME", _cache_root)
+os.environ.setdefault("HF_DATASETS_CACHE", os.path.join(_cache_root, "datasets"))
+os.environ.setdefault("TRANSFORMERS_CACHE", os.path.join(_cache_root, "transformers"))
+
 import unsloth
 from unsloth import FastLanguageModel
 
-import os
 import json
 import torch
 from datetime import datetime
@@ -188,31 +230,6 @@ def evaluate_model(
 
 
 if __name__ == "__main__":
-    # 运行前等效执行：
-    #   source env.sh
-    #   export HF_ENDPOINT=https://hf-mirror.com
-    #
-    # 注意：Python 里无法真正 "source" 影响父 shell，这里是在当前 Python 进程内加载 env.sh 的 export 变量。
-    import subprocess
-
-    def _source_env_sh_into_process(env_sh_path: str) -> None:
-        """Load `export VAR=...` from env.sh into current os.environ."""
-        if not os.path.exists(env_sh_path):
-            print(f"[warn] env.sh not found at {env_sh_path}, skipping.")
-            return
-        # Use bash to source and dump full env as NUL-separated KEY=VAL.
-        cmd = f'set -a && source "{env_sh_path}" >/dev/null 2>&1 && env -0'
-        out = subprocess.check_output(["bash", "-lc", cmd])
-        for item in out.split(b"\x00"):
-            if not item:
-                continue
-            k, _, v = item.partition(b"=")
-            if k:
-                os.environ[k.decode("utf-8", errors="ignore")] = v.decode("utf-8", errors="ignore")
-
-    _source_env_sh_into_process(os.path.join(os.path.dirname(__file__), "env.sh"))
-    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-
     # 直接写死为你启动命令中的配置
     greedy = False
     batch_size = 2
