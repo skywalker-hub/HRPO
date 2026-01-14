@@ -153,7 +153,7 @@ def evaluate_model(
 if __name__ == "__main__":
     # 直接使用默认配置，无需命令行参数
     greedy = False
-    batch_size = 1
+    batch_size = 2
     checkpoint_path = "/root/autodl-tmp/HRPO/experiments/Qwen2.5-1.5B-Instruct-gsm8k-group4-lora32-rmin0.99-temp0.5/checkpoint-934"
 
     base_model = None
