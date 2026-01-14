@@ -151,7 +151,32 @@ def evaluate_model(
 
 
 if __name__ == "__main__":
-    # 直接使用默认配置，无需命令行参数
+    # 运行前等效执行：
+    #   source env.sh
+    #   export HF_ENDPOINT=https://hf-mirror.com
+    #
+    # 注意：Python 里无法真正 "source" 影响父 shell，这里是在当前 Python 进程内加载 env.sh 的 export 变量。
+    import subprocess
+
+    def _source_env_sh_into_process(env_sh_path: str) -> None:
+        """Load `export VAR=...` from env.sh into current os.environ."""
+        if not os.path.exists(env_sh_path):
+            print(f"[warn] env.sh not found at {env_sh_path}, skipping.")
+            return
+        # Use bash to source and dump full env as NUL-separated KEY=VAL.
+        cmd = f'set -a && source "{env_sh_path}" >/dev/null 2>&1 && env -0'
+        out = subprocess.check_output(["bash", "-lc", cmd])
+        for item in out.split(b"\x00"):
+            if not item:
+                continue
+            k, _, v = item.partition(b"=")
+            if k:
+                os.environ[k.decode("utf-8", errors="ignore")] = v.decode("utf-8", errors="ignore")
+
+    _source_env_sh_into_process(os.path.join(os.path.dirname(__file__), "env.sh"))
+    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+
+    # 直接写死为你启动命令中的配置
     greedy = False
     batch_size = 2
     checkpoint_path = "/root/autodl-tmp/HRPO/experiments/Qwen2.5-1.5B-Instruct-gsm8k-group4-lora32-rmin0.99-temp0.5/checkpoint-934"
