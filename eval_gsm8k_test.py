@@ -6,6 +6,7 @@ import json
 import torch
 from datetime import datetime
 from datasets import load_dataset
+from datasets import DownloadConfig
 from transformers import GenerationConfig
 from tqdm import tqdm
 
@@ -21,6 +22,42 @@ def evaluate_model(
     num_samples: int = None,
     save_results: bool = True,
 ):
+    # ---- Make debug + CLI behave the same (HuggingFace env & cache) ----
+    # PyCharm remote debug often doesn't inherit `source env.sh` / proxy vars,
+    # and may use a different $HOME thus a different HF cache.
+    # We fix this by pinning cache dirs and using HF_ENDPOINT explicitly.
+    HF_ENDPOINT = os.environ.get("HF_ENDPOINT", "https://hf-mirror.com")
+    os.environ["HF_ENDPOINT"] = HF_ENDPOINT
+    # Pin caches to a stable directory (override via HF_CACHE_DIR if needed)
+    _cache_root = os.environ.get("HF_CACHE_DIR", "/root/autodl-tmp/hf_cache")
+    os.environ.setdefault("HF_HOME", _cache_root)
+    os.environ.setdefault("HF_DATASETS_CACHE", os.path.join(_cache_root, "datasets"))
+    os.environ.setdefault("TRANSFORMERS_CACHE", os.path.join(_cache_root, "transformers"))
+
+    def _load_gsm8k_test():
+        """
+        Prefer local cache (works offline / in restricted debug env).
+        If missing, fall back to online download via HF_ENDPOINT.
+        """
+        cache_dir = os.environ.get("HF_DATASETS_CACHE")
+        # 1) Offline / cache-only attempt
+        try:
+            return load_dataset(
+                "openai/gsm8k",
+                "main",
+                cache_dir=cache_dir,
+                download_config=DownloadConfig(local_files_only=True),
+            )["test"]
+        except Exception as e_offline:
+            print(f"[info] GSM8K not found in local cache ({cache_dir}) or cache-only load failed: {type(e_offline).__name__}: {e_offline}")
+        # 2) Online attempt (mirror)
+        return load_dataset(
+            "openai/gsm8k",
+            "main",
+            cache_dir=cache_dir,
+            download_config=DownloadConfig(local_files_only=False),
+        )["test"]
+
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name = model_path,
         max_seq_length = 1024,
@@ -34,7 +71,7 @@ def evaluate_model(
     model.load_adapter(adapter_path)
     model = FastLanguageModel.for_inference(model)
 
-    dataset = load_dataset('openai/gsm8k', 'main')['test']
+    dataset = _load_gsm8k_test()
     if num_samples and len(dataset) > num_samples:
         dataset = dataset.shuffle(seed=42).select(range(num_samples))
     total_samples = len(dataset)
