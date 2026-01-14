@@ -236,7 +236,7 @@ if __name__ == "__main__":
     checkpoint_path = "/root/autodl-tmp/HRPO/experiments/Qwen2.5-1.5B-Instruct-gsm8k-group4-lora32-rmin0.99-temp0.5/checkpoint-934"
 
     base_model = None
-    # 本地模型路径映射
+    ### 本地模型路径映射
     local_model_paths = {
         "Qwen2.5-1.5B-Instruct": "/root/autodl-tmp/models/Qwen2.5-1.5B-Instruct",
         "Qwen2.5-3B-Instruct": "/root/autodl-tmp/models/Qwen2.5-3B-Instruct"
