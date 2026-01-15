@@ -3297,7 +3297,7 @@ class GenerationMixin:
 
 
         #####主断点6:
-################################################################################################前向主循环：1层
+############################################################################前向主循环：第1层
         while self._has_unfinished_sequences(this_peer_finished, synced_gpus, device=input_ids.device):
             # prepare model inputs
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
@@ -3311,10 +3311,16 @@ class GenerationMixin:
             model_inputs.update({"is_thinking": is_thinking} if is_thinking is not None else {})
             model_inputs.update({"last_thinking_states": last_thinking_states} if last_thinking_states is not None else {})
 
+            
+            #####第一次迭代，处理完整的输入 prompt
             if is_prefill:
                 outputs = self(**model_inputs, return_dict=True)
                 is_prefill = False
+
+            #####之后迭代
             else:
+                #####主断点8:
+                #####模型前向第2层的入口：
                 outputs = model_forward(**model_inputs, return_dict=True)
 
             # synced_gpus: don't waste resources running the code we don't need; kwargs must be updated before skipping

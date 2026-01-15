@@ -929,6 +929,7 @@ def LlamaModel_fast_forward_inference(
     attention_mask = None,
     *args, **kwargs,
 ):
+    ###############################主断点10：核心第3层
     input_ids = input_ids[:,:self.max_seq_length]
     bsz, q_len = input_ids.shape
     hd = self.config.hidden_size
@@ -941,9 +942,12 @@ def LlamaModel_fast_forward_inference(
     last_thinking_states = kwargs.get('last_thinking_states')
     if is_thinking is not None and last_thinking_states is not None:
         thinking_embeds = last_thinking_states
+
+        ##############主断点11：HRPO实现处
         X_hat, a_t = self.model.thinking_residual(
             X, last_thinking_states.unsqueeze(1),
         )
+        
         embeds_ratio = a_t.mean(-1).squeeze()
         embeds_ratio[~torch.tensor(is_thinking)] = 1.
         X[is_thinking] = X_hat[is_thinking].to(X.dtype)
@@ -1011,6 +1015,8 @@ def LlamaModel_fast_forward_inference(
 
         next_decoder_cache.append(present_key_value)
     pass
+
+    ##############主断点12：前向循环完成处
     X = fast_rms_layernorm_inference(
         self.model.norm,
         X,
@@ -1019,6 +1025,7 @@ def LlamaModel_fast_forward_inference(
         variance = variance,
     )
 
+    ##############主断点13：返回主断点9
     return BaseModelOutputWithPast(
         last_hidden_state = X,
         past_key_values = next_decoder_cache,
@@ -1048,6 +1055,9 @@ def CausalLM_fast_forward(fast_forward_inference):
         *args, **kwargs,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         if past_key_values is not None:
+
+            ################################主断点9：前向第3层入口
+            #####output
             outputs = fast_forward_inference(
                 self,
                 input_ids,
@@ -1056,6 +1066,8 @@ def CausalLM_fast_forward(fast_forward_inference):
                 attention_mask = attention_mask,
                 *args, **kwargs,
             )
+
+
         else:
             causal_mask = xformers.attn_bias.LowerTriangularMask() if HAS_XFORMERS else None
 
@@ -1080,6 +1092,8 @@ def CausalLM_fast_forward(fast_forward_inference):
                 *args, **kwargs,
             )
         pass
+
+        #####最后隐藏向量
         hidden_states = outputs[0]
 
         bsz, q_len, hd = hidden_states.shape
@@ -1193,9 +1207,12 @@ def CausalLM_fast_forward(fast_forward_inference):
             pass
         pass
 
+        ##############准备返回主断点8
         if not return_dict:
             output = (logits,) + outputs[1:]
             return (loss,) + output if loss is not None else output
+
+        ##############主断点14：返回主断点8结束处
         return CausalLMOutputWithPast(
             loss = loss,
             logits = logits,
