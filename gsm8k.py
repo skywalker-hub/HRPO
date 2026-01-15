@@ -168,7 +168,7 @@ if __name__ == "__main__":
         "lr_scheduler_type": "cosine",
         "optimizer": "paged_adamw_8bit",
         "max_grad_norm": 0.1,
-        "group_size": 4,
+        "group_size": 2,
         "temperature": 0.5,
         "gradient_accumulation_steps": 4,
         "per_device_train_batch_size": 8,
