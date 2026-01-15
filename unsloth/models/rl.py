@@ -65,6 +65,8 @@ def PatchRL(FastLanguageModel):
             # We must use .clone for Unsloth since we force inference_mode
             # Rather we should have used no_grad
             original_generate = unwrapped_model.generate
+
+            ###走到这过
             def generate_with_clone(*args, **kwargs):
                 out = original_generate(*args, **kwargs)
                 if isinstance(out, torch.Tensor):
@@ -83,6 +85,7 @@ def PatchRL(FastLanguageModel):
         pass
     pass
 
+    ###打了补丁
     import trl.trainer
     trainers = dir(trl.trainer)
     trainers = [x for x in trainers if x.endswith("_trainer")]

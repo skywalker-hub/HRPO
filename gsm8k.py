@@ -1,4 +1,8 @@
 import os
+os.environ["TORCH_COMPILE_DISABLE"] = "1"  # 禁用 torch.compile
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"   # 同步 CUDA 调用，方便调试
+
+import os
 import subprocess
 
 # ---------------------------------------------------------------------------

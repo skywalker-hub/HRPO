@@ -2159,6 +2159,8 @@ class Trainer:
             kwargs (`Dict[str, Any]`, *optional*):
                 Additional keyword arguments used to hide deprecated arguments
         """
+
+        ###训练断点：训练层1
         if resume_from_checkpoint is False:
             resume_from_checkpoint = None
 
@@ -2552,6 +2554,8 @@ class Trainer:
                         and self.accelerator.distributed_type != DistributedType.DEEPSPEED
                         else contextlib.nullcontext
                     )
+
+                    ###############训练来过：疑似核心训练层
                     with context():
                         tr_loss_step = self.training_step(model, inputs, num_items_in_batch)
 
@@ -3709,11 +3713,13 @@ class Trainer:
         if hasattr(self.optimizer, "train") and callable(self.optimizer.train):
             self.optimizer.train()
 
+        ###############训练来过：
         inputs = self._prepare_inputs(inputs)
         if is_sagemaker_mp_enabled():
             loss_mb = smp_forward_backward(model, inputs, self.args.gradient_accumulation_steps)
             return loss_mb.reduce_mean().detach().to(self.args.device)
-
+       
+        ###############训练来过：
         with self.compute_loss_context_manager():
             loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
 
