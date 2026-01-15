@@ -48,7 +48,6 @@ from unsloth import FastLanguageModel, PatchFastRL
 PatchFastRL("GRPO", FastLanguageModel)
 
 import os
-import argparse
 from trl import GRPOConfig, GRPOTrainer
 from datasets import load_dataset, Dataset
 from patch import patch_trainer_optimizer
@@ -155,34 +154,29 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--lora_rank", type=int, default=32)
-
-    parser.add_argument("--lr", type=float, default=5e-6)
-    parser.add_argument("--beta", type=float, default=0.005)
-    parser.add_argument("--residual_r_min", type=float, default=0.981)
-    parser.add_argument("--residual_r_max", type=float, default=0.999)
-    parser.add_argument("--lr_residual_gate", type=float, default=1e-4)
-    parser.add_argument("--lr_residual_Lambda", type=float, default=1e-3)
-    parser.add_argument("--lr_residual_head", type=float, default=1e-4)  # 新增: 隐状态变换头的学习率
-    parser.add_argument("--weight_decay", type=float, default=0.1)
-    parser.add_argument("--warmup_ratio", type=float, default=0.1)
-    parser.add_argument("--lr_scheduler_type", type=str, default="cosine")
-    parser.add_argument("--optimizer", type=str, default="paged_adamw_8bit")
-    parser.add_argument("--max_grad_norm", type=float, default=0.1)
-
-    parser.add_argument("--group_size", type=int, default=4)
-    parser.add_argument("--temperature", type=float, default=0.5)
-
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=4)
-    parser.add_argument("--per_device_train_batch_size", type=int, default=8)
-
-    parser.add_argument("--max_prompt_length", type=int, default=1024)
-    parser.add_argument("--max_completion_length", type=int, default=1024)
-
-    parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-1.5B-Instruct")
-    parser.add_argument("--seed", type=int, default=42)
-    args = parser.parse_args()
+    args = type("Args", (), {
+        "lora_rank": 32,
+        "lr": 5e-6,
+        "beta": 0.005,
+        "residual_r_min": 0.981,
+        "residual_r_max": 0.999,
+        "lr_residual_gate": 1e-4,
+        "lr_residual_Lambda": 1e-3,
+        "lr_residual_head": 1e-4,  # 新增: 隐状态变换头的学习率
+        "weight_decay": 0.1,
+        "warmup_ratio": 0.1,
+        "lr_scheduler_type": "cosine",
+        "optimizer": "paged_adamw_8bit",
+        "max_grad_norm": 0.1,
+        "group_size": 4,
+        "temperature": 0.5,
+        "gradient_accumulation_steps": 4,
+        "per_device_train_batch_size": 8,
+        "max_prompt_length": 1024,
+        "max_completion_length": 1024,
+        "model_name": "/root/autodl-tmp/models/Qwen2.5-1.5B-Instruct",
+        "seed": 42,
+    })()
 
     # "Qwen/Qwen2.5-1.5B-Instruct"
     # "Qwen/Qwen2.5-3B-Instruct"
