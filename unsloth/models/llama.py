@@ -939,6 +939,7 @@ def LlamaModel_fast_forward_inference(
     X = X.to(_get_dtype(self.config.torch_dtype))
 
     is_thinking = kwargs.get('is_thinking')
+    #####last_thinking_states在此时被处理
     last_thinking_states = kwargs.get('last_thinking_states')
     if is_thinking is not None and last_thinking_states is not None:
         thinking_embeds = last_thinking_states
@@ -947,7 +948,7 @@ def LlamaModel_fast_forward_inference(
         X_hat, a_t = self.model.thinking_residual(
             X, last_thinking_states.unsqueeze(1),
         )
-        
+
         embeds_ratio = a_t.mean(-1).squeeze()
         embeds_ratio[~torch.tensor(is_thinking)] = 1.
         X[is_thinking] = X_hat[is_thinking].to(X.dtype)

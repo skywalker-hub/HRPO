@@ -3320,7 +3320,7 @@ class GenerationMixin:
             #####之后迭代
             else:
                 #####主断点8:
-                #####模型前向第2层的入口：
+                #####模型前向第2层的入口：last_thinking_states此时被传入
                 outputs = model_forward(**model_inputs, return_dict=True)
 
             # synced_gpus: don't waste resources running the code we don't need; kwargs must be updated before skipping
