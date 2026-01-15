@@ -3313,6 +3313,9 @@ class GenerationMixin:
 
             
             #####第一次迭代，处理完整的输入 prompt
+            #prefill 指的是“生成开始前的第一步/第一轮 forward”：
+            # 把整段 prompt（输入上下文）一次性喂给模型，
+            # 把每一层 attention 需要的 KV cache（past_key_values） 先算出来并缓存好
             if is_prefill:
                 outputs = self(**model_inputs, return_dict=True)
                 is_prefill = False
