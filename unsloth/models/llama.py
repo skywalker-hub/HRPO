@@ -941,12 +941,19 @@ def LlamaModel_fast_forward_inference(
     is_thinking = kwargs.get('is_thinking')
     #####last_thinking_states在此时被接收和处理
     last_thinking_states = kwargs.get('last_thinking_states')
+    multiplex_embedding = kwargs.get('multiplex_embedding')  # Top-K 加权嵌入
     if is_thinking is not None and last_thinking_states is not None:
         thinking_embeds = last_thinking_states
 
         ##############主断点11：HRPO实现处
+        # 如果有 multiplex_embedding，用它替换固定嵌入 X（只在 thinking 阶段）
+        X_input = X.clone()
+        if multiplex_embedding is not None:
+            thinking_mask = torch.tensor(is_thinking, device=X.device)
+            X_input[thinking_mask] = multiplex_embedding[thinking_mask].unsqueeze(1).to(X.dtype)
+        
         X_hat, a_t = self.model.thinking_residual(
-            X, last_thinking_states.unsqueeze(1),
+            X_input, last_thinking_states.unsqueeze(1),
         )
 
         embeds_ratio = a_t.mean(-1).squeeze()

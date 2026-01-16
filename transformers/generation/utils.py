@@ -3287,6 +3287,8 @@ class GenerationMixin:
 
         is_prefill = True
         is_thinking, last_thinking_states = None, None
+        multiplex_embedding = None  # Top-K 加权嵌入，用于替换固定 token 嵌入
+        topk_multiplex = getattr(generation_config, 'topk_multiplex', 5)  # 可配置的 K 值
         thinking_embeds = [self.get_input_embeddings()(input_ids)] if return_thinking_embeds else []
         thinking_mask = [
             torch.zeros_like(input_ids, dtype=torch.bool, device=input_ids.device)
@@ -3310,6 +3312,7 @@ class GenerationMixin:
             # prepare is_thinking and last_thinking_states for latent reasoning
             model_inputs.update({"is_thinking": is_thinking} if is_thinking is not None else {})
             model_inputs.update({"last_thinking_states": last_thinking_states} if last_thinking_states is not None else {})
+            model_inputs.update({"multiplex_embedding": multiplex_embedding} if multiplex_embedding is not None else {})
 
             
             #####第一次迭代，处理完整的输入 prompt
@@ -3382,6 +3385,16 @@ class GenerationMixin:
 
             strs = processing_class.batch_decode(input_ids[:, input_len:])
             is_thinking = [self.answer_start not in s for s in strs]
+            
+            # 计算 Top-K 加权嵌入 (Multiplex Embedding)
+            # Step 1: Top-K 候选采样
+            topk_probs, topk_indices = torch.topk(probs, k=topk_multiplex, dim=-1)  # [batch, K]
+            # Step 2: 局部概率重归一化
+            topk_probs_normalized = topk_probs / topk_probs.sum(dim=-1, keepdim=True)  # [batch, K]
+            # Step 3: 语义向量聚合
+            embedding_weight = self.get_input_embeddings().weight  # [vocab_size, hidden_dim]
+            topk_embeddings = embedding_weight[topk_indices]  # [batch, K, hidden_dim]
+            multiplex_embedding = torch.einsum('bk,bkd->bd', topk_probs_normalized, topk_embeddings)  # [batch, hidden_dim]
             
             # 直接使用原始隐状态，thinking_residual_head 会在 thinking_residual() 函数内被调用
             if outputs.hidden_states is not None and len(outputs.hidden_states) > 3:
