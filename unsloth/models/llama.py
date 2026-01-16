@@ -929,7 +929,7 @@ def LlamaModel_fast_forward_inference(
     attention_mask = None,
     *args, **kwargs,
 ):
-    ###############################主断点10：核心第3层
+    ######主断点10：核心第3层，HRPO实现处
     input_ids = input_ids[:,:self.max_seq_length]
     bsz, q_len = input_ids.shape
     hd = self.config.hidden_size
@@ -939,7 +939,7 @@ def LlamaModel_fast_forward_inference(
     X = X.to(_get_dtype(self.config.torch_dtype))
 
     is_thinking = kwargs.get('is_thinking')
-    #####last_thinking_states在此时被处理
+    #####last_thinking_states在此时被接收和处理
     last_thinking_states = kwargs.get('last_thinking_states')
     if is_thinking is not None and last_thinking_states is not None:
         thinking_embeds = last_thinking_states
@@ -1026,7 +1026,7 @@ def LlamaModel_fast_forward_inference(
         variance = variance,
     )
 
-    ##############主断点13：返回主断点9
+    ##############主断点13：返回主断点9，返回
     return BaseModelOutputWithPast(
         last_hidden_state = X,
         past_key_values = next_decoder_cache,
@@ -1057,7 +1057,7 @@ def CausalLM_fast_forward(fast_forward_inference):
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         if past_key_values is not None:
 
-            ################################主断点9：前向第3层入口
+            #############主断点9：前向第3层入口
             #####output
             outputs = fast_forward_inference(
                 self,
@@ -1213,7 +1213,7 @@ def CausalLM_fast_forward(fast_forward_inference):
             output = (logits,) + outputs[1:]
             return (loss,) + output if loss is not None else output
 
-        ##############主断点14：返回主断点8结束处
+        ##############主断点14：返回主断点8结束处一次核心循环
         return CausalLMOutputWithPast(
             loss = loss,
             logits = logits,

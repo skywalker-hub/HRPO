@@ -2160,7 +2160,7 @@ class Trainer:
                 Additional keyword arguments used to hide deprecated arguments
         """
 
-        ###训练断点：训练层1
+        ########训练断点：训练层1
         if resume_from_checkpoint is False:
             resume_from_checkpoint = None
 
@@ -2243,6 +2243,9 @@ class Trainer:
                 )
             finally:
                 hf_hub_utils.enable_progress_bars()
+        
+        ########训练断点2：训练循环
+        # 之后会第一次丢失调试追踪
         else:
             return inner_training_loop(
                 args=args,

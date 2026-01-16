@@ -66,7 +66,7 @@ def PatchRL(FastLanguageModel):
             # Rather we should have used no_grad
             original_generate = unwrapped_model.generate
 
-            ###走到这过
+            ###训练断点：已确认走到这过，参与生成了第一个回答
             def generate_with_clone(*args, **kwargs):
                 out = original_generate(*args, **kwargs)
                 if isinstance(out, torch.Tensor):

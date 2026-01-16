@@ -180,6 +180,8 @@ def grpo_accumulated_loss(
     advantages,
     n_chunks = -1,
 ):
+
+    ####训练断点2：
     # All Unsloth Zoo code licensed under LGPLv3
     bsz, qlen = input_ids.shape
     # Find closest multiple
@@ -941,6 +943,7 @@ class _UnslothGRPOTrainer(Trainer):
     def _move_model_to_vllm(self, *args, **kwargs): return None
 
     def _prepare_inputs(self, inputs: dict[str, Union[torch.Tensor, Any]]) -> dict[str, Union[torch.Tensor, Any]]:
+        ########训练断点：先进
         device = self.accelerator.device
         prompts = [x["prompt"] for x in inputs]
         prompts_text = [maybe_apply_chat_template(example, self.processing_class)["prompt"] for example in inputs]
@@ -983,7 +986,7 @@ class _UnslothGRPOTrainer(Trainer):
             prompt_completion_ids = torch.cat([prompt_ids, completion_ids], dim=1)
         else:
             # Regular generation path
-            ####第一次前向：
+            ####训练断点：已确认训练经过，生成第一次前向，此处开始多端口
             with unwrap_model_for_generation(self.model, self.accelerator) as unwrapped_model:
                 prompt_completion_ids, thinking_embeds, thinking_mask, embeds_ratio = unwrapped_model.generate(
                     prompt_ids, attention_mask=prompt_mask, 
@@ -1030,6 +1033,7 @@ class _UnslothGRPOTrainer(Trainer):
         else:
             completions = completions_text
 
+        ########训练断点：疑似奖励？此处会打印训练中途的输出示例
         rewards_per_func = torch.zeros(len(prompts), len(self.reward_funcs), device=device)
         for i, (reward_func, reward_processing_class) in enumerate(
             zip(self.reward_funcs, self.reward_processing_classes)
@@ -1050,6 +1054,7 @@ class _UnslothGRPOTrainer(Trainer):
                 # Repeat all input columns (but "prompt" and "completion") to match the number of generations
                 keys = [key for key in inputs[0] if key not in ["prompt", "completion"]]
                 reward_kwargs = {key: [example[key] for example in inputs] for key in keys}
+                #########这步之后打印示例
                 output_reward_func = reward_func(prompts=prompts, completions=completions, **reward_kwargs)
                 rewards_per_func[:, i] = torch.tensor(output_reward_func, dtype=torch.float32, device=device)
 
@@ -1107,6 +1112,7 @@ class _UnslothGRPOTrainer(Trainer):
             if wandb.run is not None and self.accelerator.is_main_process:
                 wandb.log({"completions": wandb.Table(dataframe=df)})
 
+        ########训练断点：又一次丢失调试追踪，之后会到断点comput_loss
         return {
             "prompt_ids": prompt_ids,
             "prompt_mask": prompt_mask,
@@ -1125,7 +1131,7 @@ class _UnslothGRPOTrainer(Trainer):
         # Compute the per-token log probabilities for the model
 
         ################该文件非正式文件，是 unsloth 在运行时动态生成的编译缓存
-        ####训练断点：
+        ####训练断点:
         prompt_ids, prompt_mask = inputs["prompt_ids"], inputs["prompt_mask"]
         completion_ids, completion_mask = inputs["completion_ids"], inputs["completion_mask"]
         thinking_embeds, thinking_mask = inputs["thinking_embeds"], inputs["thinking_mask"]
@@ -1200,6 +1206,8 @@ class _UnslothGRPOTrainer(Trainer):
             self._metrics["completion_length"].append(completion_length.item())
             self._metrics["kl"].append(mean_kl.item())
             self._metrics["new_head_norm"].append(new_head_norm)
+
+        ####训练断点：此处会失去调试追踪：
         return loss
 
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys: Optional[list[str]] = None):
