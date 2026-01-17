@@ -3288,7 +3288,7 @@ class GenerationMixin:
         is_prefill = True
         is_thinking, last_thinking_states = None, None
         multiplex_embedding = None  # Top-K 加权嵌入，用于替换固定 token 嵌入
-        topk_multiplex = getattr(generation_config, 'topk_multiplex', 5)  # 可配置的 K 值
+        topk_multiplex = getattr(generation_config, 'topk_multiplex', 3)  # 可配置的 K 值
         thinking_embeds = [self.get_input_embeddings()(input_ids)] if return_thinking_embeds else []
         thinking_mask = [
             torch.zeros_like(input_ids, dtype=torch.bool, device=input_ids.device)
