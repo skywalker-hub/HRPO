@@ -536,6 +536,7 @@ class LlamaModel(LlamaPreTrainedModel):
         self.rotary_emb = LlamaRotaryEmbedding(config=config)
         self.gradient_checkpointing = False
 
+        ############## HRPO 模块定义处
         self.thinking_residual_gate_r = nn.Linear(config.hidden_size, config.hidden_size)
         self.thinking_residual_gate_i = nn.Linear(config.hidden_size, config.hidden_size)
         self.thinking_residual_Lambda = ThinkingResidualLambda(config)
@@ -552,6 +553,7 @@ class LlamaModel(LlamaPreTrainedModel):
     def set_input_embeddings(self, value):
         self.embed_tokens = value
 
+    ############## HRPO计算函数
     def thinking_residual(self, embeds, residual, eps=1e-8):
         r_t = torch.sigmoid(self.thinking_residual_gate_r(embeds))
         i_t = torch.sigmoid(self.thinking_residual_gate_i(embeds))

@@ -952,6 +952,7 @@ def LlamaModel_fast_forward_inference(
             thinking_mask = torch.tensor(is_thinking, device=X.device)
             X_input[thinking_mask] = multiplex_embedding[thinking_mask].unsqueeze(1).to(X.dtype)
         
+        ############## HRPO处
         X_hat, a_t = self.model.thinking_residual(
             X_input, last_thinking_states.unsqueeze(1),
         )
