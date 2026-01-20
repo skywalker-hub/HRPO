@@ -939,6 +939,7 @@ def LlamaModel_fast_forward_inference(
     X = X.to(_get_dtype(self.config.torch_dtype))
 
     is_thinking = kwargs.get('is_thinking')
+    
     #####last_thinking_states在此时被接收和处理
     last_thinking_states = kwargs.get('last_thinking_states')
     if is_thinking is not None and last_thinking_states is not None:

@@ -3296,7 +3296,7 @@ class GenerationMixin:
         ] if return_thinking_embeds else []
 
 
-        #####主断点6:前向主循环：第1层
+        #####主断点6:前向最外层循环：第1层
 ############################################################################
         while self._has_unfinished_sequences(this_peer_finished, synced_gpus, device=input_ids.device):
             # prepare model inputs

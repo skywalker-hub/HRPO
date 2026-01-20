@@ -466,6 +466,7 @@ QWEN2_INPUTS_DOCSTRING = r"""
 """
 
 
+############## HRPO 参数lamda定义处
 class ThinkingResidualLambda(nn.Module):
     c = 8.0
 
@@ -514,6 +515,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
         self.rotary_emb = Qwen2RotaryEmbedding(config=config)
         self.gradient_checkpointing = False
 
+        ############## HRPO 核心模块定义处  
         self.thinking_residual_gate_r = nn.Linear(config.hidden_size, config.hidden_size)
         self.thinking_residual_gate_i = nn.Linear(config.hidden_size, config.hidden_size)
         self.thinking_residual_Lambda = ThinkingResidualLambda(config)
@@ -534,6 +536,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
     def set_input_embeddings(self, value):
         self.embed_tokens = value
 
+    ############## HRPO 核心计算函数
     def thinking_residual(self, embeds, residual, eps=1e-8):
         r_t = torch.sigmoid(self.thinking_residual_gate_r(embeds))
         i_t = torch.sigmoid(self.thinking_residual_gate_i(embeds))
