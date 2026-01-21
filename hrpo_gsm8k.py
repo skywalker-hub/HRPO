@@ -65,6 +65,10 @@ def main(args):
     # 这样可以避免随机噪声扰乱模型输出，让模型渐进地学习如何利用隐状态
     import torch.nn as nn
     nn.init.zeros_(model.model.model.thinking_residual_head.weight)
+    
+    # 初始化 token_gate_matrix 为 -3，sigmoid(-3) ≈ 0.047，初始时门控几乎关闭
+    # 注：post_init() 会覆盖模型定义中的初始化，所以需要在这里重新设置
+    nn.init.constant_(model.model.model.token_gate_matrix.weight, -3.0)
 
     # ============ 打印新加入矩阵的初始值情况 ============
     print("\n" + "=" * 60)
