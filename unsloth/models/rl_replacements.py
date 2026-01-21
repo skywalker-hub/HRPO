@@ -493,8 +493,11 @@ def grpo_trainer_compute_loss(function_name, function):
         mean_embeds_ratio = embeds_ratio[embeds_ratio_mask].mean()
         mean_hidden_ratio = torch.sqrt(1 - embeds_ratio[embeds_ratio_mask] ** 2).mean()
 
-        # 获取 thinking_residual_head 的梯度范数
+        # 获取 thinking_residual_head 的统计信息
         new_head_norm = 0.0
+        new_head_mean = 0.0
+        new_head_std = 0.0
+        new_head_abs_max = 0.0
         # 获取 token_gate_matrix 的统计信息
         token_gate_grad_norm = 0.0
         token_gate_mean = 0.0
@@ -504,8 +507,12 @@ def grpo_trainer_compute_loss(function_name, function):
             base_model = self.model
             while hasattr(base_model, 'model'):
                 base_model = base_model.model
+            # 记录 thinking_residual_head 的信息
             if hasattr(base_model, 'thinking_residual_head'):
                 head_weight = base_model.thinking_residual_head.weight
+                new_head_mean = head_weight.data.mean().item()
+                new_head_std = head_weight.data.std().item()
+                new_head_abs_max = head_weight.data.abs().max().item()
                 if head_weight.grad is not None:
                     new_head_norm = head_weight.grad.norm().item()
             # 记录 token_gate_matrix 的信息
@@ -525,7 +532,11 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics[mode]["hidden_ratio"].append(mean_hidden_ratio.item())
             self._metrics[mode]["completion_length"].append(completion_length.item())
             self._metrics[mode]["kl"].append(mean_kl.item())
+            # thinking_residual_head 指标
             self._metrics[mode]["new_head_norm"].append(new_head_norm)
+            self._metrics[mode]["new_head_mean"].append(new_head_mean)
+            self._metrics[mode]["new_head_std"].append(new_head_std)
+            self._metrics[mode]["new_head_abs_max"].append(new_head_abs_max)
             # token_gate_matrix 指标
             self._metrics[mode]["token_gate_grad_norm"].append(token_gate_grad_norm)
             self._metrics[mode]["token_gate_mean"].append(token_gate_mean)
@@ -536,7 +547,11 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics["hidden_ratio"].append(mean_hidden_ratio.item())
             self._metrics["completion_length"].append(completion_length.item())
             self._metrics["kl"].append(mean_kl.item())
+            # thinking_residual_head 指标
             self._metrics["new_head_norm"].append(new_head_norm)
+            self._metrics["new_head_mean"].append(new_head_mean)
+            self._metrics["new_head_std"].append(new_head_std)
+            self._metrics["new_head_abs_max"].append(new_head_abs_max)
             # token_gate_matrix 指标
             self._metrics["token_gate_grad_norm"].append(token_gate_grad_norm)
             self._metrics["token_gate_mean"].append(token_gate_mean)
