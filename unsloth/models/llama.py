@@ -663,8 +663,11 @@ def LlamaModel_fast_forward(
     thinking_mask = kwargs.get('thinking_mask')
     if thinking_mask is not None:
         new_inputs_embeds = inputs_embeds.clone()
+        # 传入 input_ids 用于查询 token 门控矩阵
+        masked_input_ids = input_ids[thinking_mask] if input_ids is not None else None
         new_inputs_embeds[thinking_mask] = self.thinking_residual(
             inputs_embeds[thinking_mask], thinking_embeds[thinking_mask],
+            input_ids=masked_input_ids,
         )[0].to(inputs_embeds.dtype)
         inputs_embeds = new_inputs_embeds
 
@@ -946,8 +949,10 @@ def LlamaModel_fast_forward_inference(
         thinking_embeds = last_thinking_states
 
         ##############主断点11：HRPO调用处
+        # 传入 input_ids 用于查询 token 门控矩阵
         X_hat, a_t = self.model.thinking_residual(
             X, last_thinking_states.unsqueeze(1),
+            input_ids=input_ids,
         )
 
         embeds_ratio = a_t.mean(-1).squeeze()
@@ -2306,7 +2311,7 @@ class FastLlamaModel:
                 if modules_to_save is None: modules_to_save = ["embed_tokens"]
                 else: modules_to_save.append("embed_tokens")
 
-            elif "thinking_residual" in module:
+            elif "thinking_residual" in module or "token_gate_matrix" in module:
                 train_thinking_residual = True
                 if modules_to_save is None: modules_to_save = [module]
                 else: modules_to_save = list(set(modules_to_save).add(module))
@@ -2361,12 +2366,12 @@ class FastLlamaModel:
                     train_lm_head = True
                 elif module == "embed_tokens":
                     train_embed_tokens = True
-                elif "thinking_residual" in module:
+                elif "thinking_residual" in module or "token_gate_matrix" in module:
                     train_thinking_residual = True
                 else:
                     raise TypeError(
-                        f"Unsloth: Module = {module} is not allowed. Only 'lm_head', 'embed_tokens' "
-                        "and 'thinking_residual' components are allowed."
+                        f"Unsloth: Module = {module} is not allowed. Only 'lm_head', 'embed_tokens', "
+                        "'thinking_residual' and 'token_gate_matrix' components are allowed."
                     )
             pass
         pass
@@ -2498,6 +2503,16 @@ class FastLlamaModel:
                     model.model.model.thinking_residual_Lambda.modules_to_save.default\
                         .to(device = "cuda", dtype = torch.float32, non_blocking = True)
                     model.model.model.thinking_residual_Lambda.modules_to_save.default.requires_grad_(True)
+                if "thinking_residual_head" in module:
+                    assert(hasattr(model.model.model.thinking_residual_head, "modules_to_save"))
+                    model.model.model.thinking_residual_head.modules_to_save.default\
+                        .to(device = "cuda", dtype = new_dtype, non_blocking = True)
+                    model.model.model.thinking_residual_head.modules_to_save.default.requires_grad_(True)
+                if "token_gate_matrix" in module:
+                    assert(hasattr(model.model.model.token_gate_matrix, "modules_to_save"))
+                    model.model.model.token_gate_matrix.modules_to_save.default\
+                        .to(device = "cuda", dtype = new_dtype, non_blocking = True)
+                    model.model.model.token_gate_matrix.modules_to_save.default.requires_grad_(True)
 
         # Patch tokenizer to pad to the right
         internal_model = model

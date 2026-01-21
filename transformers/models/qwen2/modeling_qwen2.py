@@ -526,6 +526,12 @@ class Qwen2Model(Qwen2PreTrainedModel):
         #   - (hidden_size, hidden_size // 2): 降维，减少参数量
         #   - (hidden_size, hidden_size // 4): 更激进降维
         self.thinking_residual_head = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
+        
+        # 新增：Token 门控矩阵，基于离散 token ID 的可学习门控
+        # 形状：(vocab_size, hidden_size)，与 embed_tokens 一致
+        # 初始化为 -3，经过 sigmoid 后约为 0.047，初始时几乎不起作用
+        self.token_gate_matrix = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=self.padding_idx)
+        nn.init.constant_(self.token_gate_matrix.weight, -3.0)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -537,12 +543,38 @@ class Qwen2Model(Qwen2PreTrainedModel):
         self.embed_tokens = value
 
     ############## HRPO 核心计算函数
-    def thinking_residual(self, embeds, residual, eps=1e-8):
+    def thinking_residual(self, embeds, residual, input_ids=None, eps=1e-8):
+        """
+        混合推理残差计算函数
+        
+        Args:
+            embeds: 当前 token 的嵌入向量 (batch, seq_len, hidden_size)
+            residual: 上一步的隐藏状态 (batch, seq_len, hidden_size)
+            input_ids: 当前 token 的 ID (batch, seq_len)，用于查询门控矩阵
+            eps: 数值稳定性参数
+        
+        Returns:
+            new_embeds: 混合后的嵌入向量
+            a_t: 衰减系数
+        """
         r_t = torch.sigmoid(self.thinking_residual_gate_r(embeds))
-        i_t = torch.sigmoid(self.thinking_residual_gate_i(embeds))
+        i_t = torch.sigmoid(self.thinking_residual_gate_i(embeds))  # 保留 i_t 定义，但不再使用
         a_t = self.thinking_residual_Lambda(r_t)
-        h_residual = self.thinking_residual_head(residual)  # ← 现在训练时也会被调用！
-        return a_t * embeds + torch.sqrt(1 - a_t.pow(2) + eps) * (i_t * h_residual), a_t
+        h_residual = self.thinking_residual_head(residual)  # 连续信息向量
+        
+        # 新增：基于 token ID 的离散门控
+        # g_k = sigmoid(lookup(k))，形状 (batch, seq_len, hidden_size)
+        if input_ids is not None:
+            gate_logits = self.token_gate_matrix(input_ids)  # (batch, seq_len, hidden_size)
+            g_k = torch.sigmoid(gate_logits)
+        else:
+            # 如果没有提供 input_ids，回退到全 1 门控（相当于不过滤）
+            g_k = torch.ones_like(h_residual)
+        
+        # continuous_bias = h_residual * g_k，替代原来的 i_t * h_residual
+        continuous_bias = h_residual * g_k
+        
+        return a_t * embeds + torch.sqrt(1 - a_t.pow(2) + eps) * continuous_bias, a_t
 
     @add_start_docstrings_to_model_forward(QWEN2_INPUTS_DOCSTRING)
     def forward(

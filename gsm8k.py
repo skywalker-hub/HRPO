@@ -99,6 +99,7 @@ def main(args):
             "thinking_residual_gate_i",
             "thinking_residual_Lambda",
             "thinking_residual_head",  # 新增: 隐状态变换头
+            "token_gate_matrix",  # 新增: Token 门控矩阵
         ], 
         lora_alpha = args.lora_rank * 2,
         use_gradient_checkpointing = "unsloth",
@@ -155,6 +156,7 @@ def main(args):
         args.lr_residual_gate,
         args.lr_residual_Lambda,
         args.lr_residual_head,  # 新增: 隐状态变换头的学习率
+        args.lr_token_gate_matrix,  # 新增: Token 门控矩阵的学习率
     )
     trainer.train()
 
@@ -169,6 +171,7 @@ if __name__ == "__main__":
         "lr_residual_gate": 1e-4,
         "lr_residual_Lambda": 1e-3,
         "lr_residual_head": 1e-4,  # 新增: 隐状态变换头的学习率
+        "lr_token_gate_matrix": 1e-4,  # 新增: Token 门控矩阵的学习率
         "weight_decay": 0.1,
         "warmup_ratio": 0.1,
         "lr_scheduler_type": "cosine",
@@ -192,4 +195,3 @@ if __name__ == "__main__":
     main(args)
 
     ###日志：本代码仅对HRPO的h做了替换，加入了一个线性头训练。
-    

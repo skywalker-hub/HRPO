@@ -50,6 +50,7 @@ def main(args):
             "thinking_residual_gate_i",
             "thinking_residual_Lambda",
             "thinking_residual_head",  # 新增: 隐状态变换头
+            "token_gate_matrix",  # 新增: Token 门控矩阵
         ], 
         lora_alpha = args.lora_rank * 2,
         use_gradient_checkpointing = "unsloth",
@@ -106,6 +107,7 @@ def main(args):
         args.lr_residual_gate,
         args.lr_residual_Lambda,
         args.lr_residual_head,  # 新增: 隐状态变换头的学习率
+        args.lr_token_gate_matrix,  # 新增: Token 门控矩阵的学习率
     )
     trainer.train()
 
@@ -121,6 +123,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr_residual_gate", type=float, default=1e-4)
     parser.add_argument("--lr_residual_Lambda", type=float, default=1e-3)
     parser.add_argument("--lr_residual_head", type=float, default=1e-4)  # 新增: 隐状态变换头的学习率
+    parser.add_argument("--lr_token_gate_matrix", type=float, default=1e-4)  # 新增: Token 门控矩阵的学习率
     parser.add_argument("--weight_decay", type=float, default=0.1)
     parser.add_argument("--warmup_ratio", type=float, default=0.1)
     parser.add_argument("--lr_scheduler_type", type=str, default="cosine")
