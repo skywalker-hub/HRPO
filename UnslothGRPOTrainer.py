@@ -1182,6 +1182,11 @@ class _UnslothGRPOTrainer(Trainer):
 
         # 获取 thinking_residual_head 的梯度范数
         new_head_norm = 0.0
+        # 获取 token_gate_matrix 的统计信息
+        token_gate_grad_norm = 0.0
+        token_gate_mean = 0.0
+        token_gate_std = 0.0
+        token_gate_sigmoid_mean = 0.0
         try:
             base_model = self.model
             while hasattr(base_model, 'model'):
@@ -1190,6 +1195,14 @@ class _UnslothGRPOTrainer(Trainer):
                 head_weight = base_model.thinking_residual_head.weight
                 if head_weight.grad is not None:
                     new_head_norm = head_weight.grad.norm().item()
+            # 记录 token_gate_matrix 的信息
+            if hasattr(base_model, 'token_gate_matrix'):
+                gate_weight = base_model.token_gate_matrix.weight
+                token_gate_mean = gate_weight.data.mean().item()
+                token_gate_std = gate_weight.data.std().item()
+                token_gate_sigmoid_mean = torch.sigmoid(gate_weight.data).mean().item()
+                if gate_weight.grad is not None:
+                    token_gate_grad_norm = gate_weight.grad.norm().item()
         except:
             pass
 
@@ -1200,12 +1213,22 @@ class _UnslothGRPOTrainer(Trainer):
             self._metrics[mode]["completion_length"].append(completion_length.item())
             self._metrics[mode]["kl"].append(mean_kl.item())
             self._metrics[mode]["new_head_norm"].append(new_head_norm)
+            # token_gate_matrix 指标
+            self._metrics[mode]["token_gate_grad_norm"].append(token_gate_grad_norm)
+            self._metrics[mode]["token_gate_mean"].append(token_gate_mean)
+            self._metrics[mode]["token_gate_std"].append(token_gate_std)
+            self._metrics[mode]["token_gate_sigmoid_mean"].append(token_gate_sigmoid_mean)
         else:
             self._metrics["embeds_ratio"].append(mean_embeds_ratio.item())
             self._metrics["hidden_ratio"].append(mean_hidden_ratio.item())
             self._metrics["completion_length"].append(completion_length.item())
             self._metrics["kl"].append(mean_kl.item())
             self._metrics["new_head_norm"].append(new_head_norm)
+            # token_gate_matrix 指标
+            self._metrics["token_gate_grad_norm"].append(token_gate_grad_norm)
+            self._metrics["token_gate_mean"].append(token_gate_mean)
+            self._metrics["token_gate_std"].append(token_gate_std)
+            self._metrics["token_gate_sigmoid_mean"].append(token_gate_sigmoid_mean)
 
         ####训练断点：此处会失去调试追踪：
         return loss
