@@ -929,7 +929,7 @@ def LlamaModel_fast_forward_inference(
     attention_mask = None,
     *args, **kwargs,
 ):
-    ######主断点10：核心第3层，HRPO实现处
+    ######主断点10：核心第3层，HRPO调用处
     input_ids = input_ids[:,:self.max_seq_length]
     bsz, q_len = input_ids.shape
     hd = self.config.hidden_size
@@ -939,13 +939,13 @@ def LlamaModel_fast_forward_inference(
     X = X.to(_get_dtype(self.config.torch_dtype))
 
     is_thinking = kwargs.get('is_thinking')
-    
+
     #####last_thinking_states在此时被接收和处理
     last_thinking_states = kwargs.get('last_thinking_states')
     if is_thinking is not None and last_thinking_states is not None:
         thinking_embeds = last_thinking_states
 
-        ##############主断点11：HRPO实现处
+        ##############主断点11：HRPO调用处
         X_hat, a_t = self.model.thinking_residual(
             X, last_thinking_states.unsqueeze(1),
         )
