@@ -5,6 +5,7 @@ PatchFastRL("GRPO", FastLanguageModel)
 
 import os
 import argparse
+import torch
 from trl import GRPOConfig, GRPOTrainer
 from datasets import load_dataset, Dataset
 from patch import patch_trainer_optimizer
@@ -64,6 +65,33 @@ def main(args):
     # 这样可以避免随机噪声扰乱模型输出，让模型渐进地学习如何利用隐状态
     import torch.nn as nn
     nn.init.zeros_(model.model.model.thinking_residual_head.weight)
+
+    # ============ 打印新加入矩阵的初始值情况 ============
+    print("\n" + "=" * 60)
+    print("HRPO 新增模块初始值检查")
+    print("=" * 60)
+    
+    # 1. thinking_residual_head 初始值（期望全为 0）
+    head_weight = model.model.model.thinking_residual_head.weight.data
+    print(f"\n[thinking_residual_head]")
+    print(f"  形状: {head_weight.shape}")
+    print(f"  最小值: {head_weight.min().item():.6f}")
+    print(f"  最大值: {head_weight.max().item():.6f}")
+    print(f"  均值: {head_weight.mean().item():.6f}")
+    print(f"  是否全为0: {(head_weight == 0).all().item()}")
+    
+    # 2. token_gate_matrix 初始值（期望全为 -3）
+    gate_weight = model.model.model.token_gate_matrix.weight.data
+    print(f"\n[token_gate_matrix]")
+    print(f"  形状: {gate_weight.shape}")
+    print(f"  最小值: {gate_weight.min().item():.6f}")
+    print(f"  最大值: {gate_weight.max().item():.6f}")
+    print(f"  均值: {gate_weight.mean().item():.6f}")
+    print(f"  是否全为-3: {(gate_weight == -3.0).all().item()}")
+    print(f"  sigmoid后的值范围: [{torch.sigmoid(gate_weight).min().item():.6f}, {torch.sigmoid(gate_weight).max().item():.6f}]")
+    
+    print("=" * 60 + "\n")
+    # ============ 初始值检查结束 ============
 
     training_args = GRPOConfig(
         use_vllm = False,
