@@ -112,11 +112,30 @@ def main(args):
     # 零初始化 thinking_residual_head，让训练初期 h_residual=0，模型行为与原来一致
     # 这样可以避免随机噪声扰乱模型输出，让模型渐进地学习如何利用隐状态
     import torch.nn as nn
-    nn.init.zeros_(model.model.model.thinking_residual_head.weight)
     
-    # 初始化 token_gate_matrix 为 -3，sigmoid(-3) ≈ 0.047，初始时门控几乎关闭
-    # 注：post_init() 会覆盖模型定义中的初始化，所以需要在这里重新设置
-    nn.init.constant_(model.model.model.token_gate_matrix.weight, -3.0)
+    # 注意：PEFT 的 modules_to_save 会创建两个副本：
+    #   - original_module: 原始权重（frozen）
+    #   - modules_to_save.default: 可训练副本
+    # 我们需要初始化 modules_to_save.default.weight！
+    
+    # 获取真正可训练的权重
+    head_module = model.model.model.thinking_residual_head
+    gate_module = model.model.model.token_gate_matrix
+    
+    # 检查是否被 PEFT 包装
+    if hasattr(head_module, 'modules_to_save'):
+        head_trainable_weight = head_module.modules_to_save.default.weight
+    else:
+        head_trainable_weight = head_module.weight
+    
+    if hasattr(gate_module, 'modules_to_save'):
+        gate_trainable_weight = gate_module.modules_to_save.default.weight
+    else:
+        gate_trainable_weight = gate_module.weight
+    
+    # 初始化可训练权重
+    nn.init.zeros_(head_trainable_weight)
+    nn.init.constant_(gate_trainable_weight, -3.0)
 
     training_args = GRPOConfig(
         use_vllm = False,

@@ -64,11 +64,34 @@ def main(args):
     # 零初始化 thinking_residual_head，让训练初期 h_residual=0，模型行为与原来一致
     # 这样可以避免随机噪声扰乱模型输出，让模型渐进地学习如何利用隐状态
     import torch.nn as nn
-    nn.init.zeros_(model.model.model.thinking_residual_head.weight)
     
-    # 初始化 token_gate_matrix 为 -3，sigmoid(-3) ≈ 0.047，初始时门控几乎关闭
-    # 注：post_init() 会覆盖模型定义中的初始化，所以需要在这里重新设置
-    nn.init.constant_(model.model.model.token_gate_matrix.weight, -3.0)
+    # 注意：PEFT 的 modules_to_save 会创建两个副本：
+    #   - original_module: 原始权重（frozen）
+    #   - modules_to_save.default: 可训练副本
+    # 我们需要初始化 modules_to_save.default.weight！
+    
+    # 获取真正可训练的权重
+    head_module = model.model.model.thinking_residual_head
+    gate_module = model.model.model.token_gate_matrix
+    
+    # 检查是否被 PEFT 包装
+    if hasattr(head_module, 'modules_to_save'):
+        head_trainable_weight = head_module.modules_to_save.default.weight
+    else:
+        head_trainable_weight = head_module.weight
+    
+    if hasattr(gate_module, 'modules_to_save'):
+        gate_trainable_weight = gate_module.modules_to_save.default.weight
+    else:
+        gate_trainable_weight = gate_module.weight
+    
+    # 初始化可训练权重
+    nn.init.zeros_(head_trainable_weight)
+    nn.init.constant_(gate_trainable_weight, -3.0)
+    
+    print(f"\n初始化完成:")
+    print(f"  thinking_residual_head: 使用 {'modules_to_save.default' if hasattr(head_module, 'modules_to_save') else 'weight'}")
+    print(f"  token_gate_matrix: 使用 {'modules_to_save.default' if hasattr(gate_module, 'modules_to_save') else 'weight'}")
 
     # ============ 打印新加入矩阵的初始值情况 ============
     print("\n" + "=" * 60)
@@ -76,7 +99,7 @@ def main(args):
     print("=" * 60)
     
     # 1. thinking_residual_head 初始值（期望全为 0）
-    head_weight = model.model.model.thinking_residual_head.weight.data
+    head_weight = head_trainable_weight.data
     print(f"\n[thinking_residual_head]")
     print(f"  形状: {head_weight.shape}")
     print(f"  最小值: {head_weight.min().item():.6f}")
@@ -85,7 +108,7 @@ def main(args):
     print(f"  是否全为0: {(head_weight == 0).all().item()}")
     
     # 2. token_gate_matrix 初始值（期望全为 -3）
-    gate_weight = model.model.model.token_gate_matrix.weight.data
+    gate_weight = gate_trainable_weight.data
     print(f"\n[token_gate_matrix]")
     print(f"  形状: {gate_weight.shape}")
     print(f"  最小值: {gate_weight.min().item():.6f}")
