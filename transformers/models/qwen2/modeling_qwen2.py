@@ -579,7 +579,6 @@ class Qwen2Model(Qwen2PreTrainedModel):
             if self.training and not hasattr(self, '_gate_none_debug_printed'):
                 print(f"\n[WARNING] token_gate_matrix 未被调用! input_ids 是 None")
                 self._gate_none_debug_printed = True
-            
             # 如果没有提供 input_ids，回退到全 1 门控（相当于不过滤）
             g_k = torch.ones_like(h_residual)
         
