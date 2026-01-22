@@ -1242,6 +1242,8 @@ class _UnslothGRPOTrainer(Trainer):
                     if changed_count > 0:
                         changed_rows_mean = row_mean[changed_mask].mean().item()
                         print(f"\n[GATE CHANGE] {changed_count}/{gate_weight_fp32.shape[0]} rows changed, mean of changed rows: {changed_rows_mean:.6f}")
+                    else:
+                        print(f"\n[GATE CHANGE] 0/{gate_weight_fp32.shape[0]} rows changed (all rows still at init value {init_value})")
                     self._gate_change_count_printed = True
                     self._last_changed_count = changed_count
                 
