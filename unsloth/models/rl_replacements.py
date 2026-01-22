@@ -503,6 +503,7 @@ def grpo_trainer_compute_loss(function_name, function):
         token_gate_mean = 0.0
         token_gate_std = 0.0
         token_gate_sigmoid_mean = 0.0
+        token_gate_std_batch = 0.0
         try:
             base_model = self.model
             while hasattr(base_model, 'model'):
@@ -523,14 +524,33 @@ def grpo_trainer_compute_loss(function_name, function):
             # 记录 token_gate_matrix 的信息
             if hasattr(base_model, 'token_gate_matrix'):
                 gate_module = base_model.token_gate_matrix
+                
+                # 调试：打印一次检查是否正确访问 modules_to_save
+                if not hasattr(self, '_gate_monitor_debug_printed'):
+                    print(f"\n[监控调试] token_gate_matrix 类型: {type(gate_module)}")
+                    print(f"  hasattr(modules_to_save): {hasattr(gate_module, 'modules_to_save')}")
+                    if hasattr(gate_module, 'modules_to_save'):
+                        print(f"  modules_to_save.default: {gate_module.modules_to_save.default}")
+                    self._gate_monitor_debug_printed = True
+                
                 gate_weight = (
                     gate_module.modules_to_save.default.weight
                     if hasattr(gate_module, "modules_to_save")
                     else gate_module.weight
                 )
-                token_gate_mean = gate_weight.data.mean().item()
-                token_gate_std = gate_weight.data.std().item()
-                token_gate_sigmoid_mean = torch.sigmoid(gate_weight.data).mean().item()
+                gate_weight_fp32 = gate_weight.data.float()
+                token_gate_mean = gate_weight_fp32.mean().item()
+                token_gate_std = gate_weight_fp32.std().item()
+                token_gate_sigmoid_mean = torch.sigmoid(gate_weight_fp32).mean().item()
+                try:
+                    if "input_ids" in locals() and input_ids is not None:
+                        unique_ids = torch.unique(input_ids.detach())
+                        if unique_ids.numel() > 2048:
+                            unique_ids = unique_ids[:2048]
+                        batch_rows = gate_weight_fp32.index_select(0, unique_ids)
+                        token_gate_std_batch = batch_rows.std().item()
+                except Exception:
+                    pass
                 if gate_weight.grad is not None:
                     token_gate_grad_norm = gate_weight.grad.norm().item()
         except:
@@ -552,6 +572,7 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics[mode]["token_gate_mean"].append(token_gate_mean)
             self._metrics[mode]["token_gate_std"].append(token_gate_std)
             self._metrics[mode]["token_gate_sigmoid_mean"].append(token_gate_sigmoid_mean)
+            self._metrics[mode]["token_gate_std_batch"].append(token_gate_std_batch)
         else:
             self._metrics["embeds_ratio"].append(mean_embeds_ratio.item())
             self._metrics["hidden_ratio"].append(mean_hidden_ratio.item())
@@ -567,6 +588,7 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics["token_gate_mean"].append(token_gate_mean)
             self._metrics["token_gate_std"].append(token_gate_std)
             self._metrics["token_gate_sigmoid_mean"].append(token_gate_sigmoid_mean)
+            self._metrics["token_gate_std_batch"].append(token_gate_std_batch)
         return loss
     pass
 
