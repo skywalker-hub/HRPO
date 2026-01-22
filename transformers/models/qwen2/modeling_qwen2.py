@@ -529,9 +529,9 @@ class Qwen2Model(Qwen2PreTrainedModel):
         
         # 新增：Token 门控矩阵，基于离散 token ID 的可学习门控
         # 形状：(vocab_size, hidden_size)，与 embed_tokens 一致
-        # 初始化为 -3，经过 sigmoid 后约为 0.047，初始时几乎不起作用
+        # 注意：这里的初始化会被 post_init() 中的 _init_weights() 覆盖
+        # 真正的初始化在训练脚本 (hrpo_gsm8k.py) 中对 modules_to_save.default.weight 进行
         self.token_gate_matrix = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=self.padding_idx)
-        nn.init.constant_(self.token_gate_matrix.weight, -3.0)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -542,7 +542,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
     def set_input_embeddings(self, value):
         self.embed_tokens = value
 
-    ############## HRPO 核心计算函数
+    #####主断点：HRPO核心计算函数
     def thinking_residual(self, embeds, residual, input_ids=None, eps=1e-8):
         """
         混合推理残差计算函数

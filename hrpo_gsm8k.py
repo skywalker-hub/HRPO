@@ -61,20 +61,15 @@ def main(args):
         r_min = args.residual_r_min, r_max = args.residual_r_max,
     )
     
-    # 零初始化 thinking_residual_head，让训练初期 h_residual=0，模型行为与原来一致
-    # 这样可以避免随机噪声扰乱模型输出，让模型渐进地学习如何利用隐状态
+    # ============ 【真正生效的初始化】 ============
+    # 注意：模型定义中的初始化会被 post_init() 覆盖，PEFT 包装后需要初始化 modules_to_save.default
+    # 这里才是真正决定训练初始值的地方！
     import torch.nn as nn
     
-    # 注意：PEFT 的 modules_to_save 会创建两个副本：
-    #   - original_module: 原始权重（frozen）
-    #   - modules_to_save.default: 可训练副本
-    # 我们需要初始化 modules_to_save.default.weight！
-    
-    # 获取真正可训练的权重
+    # 获取真正可训练的权重（PEFT 包装后是 modules_to_save.default.weight）
     head_module = model.model.model.thinking_residual_head
     gate_module = model.model.model.token_gate_matrix
     
-    # 检查是否被 PEFT 包装
     if hasattr(head_module, 'modules_to_save'):
         head_trainable_weight = head_module.modules_to_save.default.weight
     else:
@@ -85,9 +80,10 @@ def main(args):
     else:
         gate_trainable_weight = gate_module.weight
     
-    # 初始化可训练权重
-    nn.init.zeros_(head_trainable_weight)
-    nn.init.constant_(gate_trainable_weight, -3.0)
+    # ★★★ 真正生效的初始化 ★★★
+    nn.init.zeros_(head_trainable_weight)           # thinking_residual_head: 初始化为 0
+    nn.init.constant_(gate_trainable_weight, -3.0)  # token_gate_matrix: 初始化为 -3, sigmoid(-3)≈0.047
+    # ★★★ 修改上面的值来改变初始化 ★★★
     
     print(f"\n初始化完成:")
     print(f"  thinking_residual_head: 使用 {'modules_to_save.default' if hasattr(head_module, 'modules_to_save') else 'weight'}")
