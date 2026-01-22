@@ -509,7 +509,12 @@ def grpo_trainer_compute_loss(function_name, function):
                 base_model = base_model.model
             # 记录 thinking_residual_head 的信息
             if hasattr(base_model, 'thinking_residual_head'):
-                head_weight = base_model.thinking_residual_head.weight
+                head_module = base_model.thinking_residual_head
+                head_weight = (
+                    head_module.modules_to_save.default.weight
+                    if hasattr(head_module, "modules_to_save")
+                    else head_module.weight
+                )
                 new_head_mean = head_weight.data.mean().item()
                 new_head_std = head_weight.data.std().item()
                 new_head_abs_max = head_weight.data.abs().max().item()
@@ -517,7 +522,12 @@ def grpo_trainer_compute_loss(function_name, function):
                     new_head_norm = head_weight.grad.norm().item()
             # 记录 token_gate_matrix 的信息
             if hasattr(base_model, 'token_gate_matrix'):
-                gate_weight = base_model.token_gate_matrix.weight
+                gate_module = base_model.token_gate_matrix
+                gate_weight = (
+                    gate_module.modules_to_save.default.weight
+                    if hasattr(gate_module, "modules_to_save")
+                    else gate_module.weight
+                )
                 token_gate_mean = gate_weight.data.mean().item()
                 token_gate_std = gate_weight.data.std().item()
                 token_gate_sigmoid_mean = torch.sigmoid(gate_weight.data).mean().item()
