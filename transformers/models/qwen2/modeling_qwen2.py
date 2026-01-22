@@ -565,19 +565,19 @@ class Qwen2Model(Qwen2PreTrainedModel):
         # 新增：基于 token ID 的离散门控
         # g_k = sigmoid(lookup(k))，形状 (batch, seq_len, hidden_size)
         if input_ids is not None:
-            # 调试：记录 input_ids 是否被传入（仅在训练模式下打印一次）
+            # Debug: record if input_ids is passed (print once in training mode)
             if self.training and not hasattr(self, '_gate_debug_printed'):
-                print(f"\n[DEBUG] token_gate_matrix 被调用!")
+                print(f"\n[DEBUG] token_gate_matrix called!")
                 print(f"  input_ids shape: {input_ids.shape}")
-                print(f"  input_ids 样例: {input_ids.flatten()[:10].tolist()}")
+                print(f"  input_ids sample: {input_ids.flatten()[:10].tolist()}")
                 self._gate_debug_printed = True
             
             gate_logits = self.token_gate_matrix(input_ids)  # (batch, seq_len, hidden_size)
             g_k = torch.sigmoid(gate_logits)
         else:
-            # 调试：如果 input_ids 是 None，说明没有传入
+            # Debug: if input_ids is None
             if self.training and not hasattr(self, '_gate_none_debug_printed'):
-                print(f"\n[WARNING] token_gate_matrix 未被调用! input_ids 是 None")
+                print(f"\n[WARNING] token_gate_matrix NOT called! input_ids is None")
                 self._gate_none_debug_printed = True
             # 如果没有提供 input_ids，回退到全 1 门控（相当于不过滤）
             g_k = torch.ones_like(h_residual)

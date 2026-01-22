@@ -15,8 +15,8 @@ def patch_trainer_optimizer(trainer, lr_thinking_residual_gate=1e-4, thinking_re
         if self.optimizer is None:
             decay_parameters = self.get_decay_parameter_names(opt_model)
             
-            # ============ 调试：打印所有参数名 ============
-            print("\n[patch.py 调试] 检查参数名称...")
+            # ============ Debug: print all param names ============
+            print("\n[patch.py DEBUG] Checking parameter names...")
             gate_params = []
             head_params = []
             for n, p in opt_model.named_parameters():

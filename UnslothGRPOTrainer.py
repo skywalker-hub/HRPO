@@ -1212,9 +1212,9 @@ class _UnslothGRPOTrainer(Trainer):
             if hasattr(base_model, 'token_gate_matrix'):
                 gate_module = base_model.token_gate_matrix
                 
-                # 调试：打印一次检查是否正确访问 modules_to_save
+                # Debug: print once to check modules_to_save access
                 if not hasattr(self, '_gate_monitor_debug_printed'):
-                    print(f"\n[监控调试] token_gate_matrix 类型: {type(gate_module)}")
+                    print(f"\n[MONITOR DEBUG] token_gate_matrix type: {type(gate_module)}")
                     print(f"  hasattr(modules_to_save): {hasattr(gate_module, 'modules_to_save')}")
                     if hasattr(gate_module, 'modules_to_save'):
                         print(f"  modules_to_save.default: {gate_module.modules_to_save.default}")
@@ -1229,15 +1229,22 @@ class _UnslothGRPOTrainer(Trainer):
                 token_gate_mean = gate_weight_fp32.mean().item()
                 token_gate_std = gate_weight_fp32.std().item()
                 token_gate_sigmoid_mean = torch.sigmoid(gate_weight_fp32).mean().item()
-                try:
-                    if "input_ids" in locals() and input_ids is not None:
-                        unique_ids = torch.unique(input_ids.detach())
-                        if unique_ids.numel() > 2048:
-                            unique_ids = unique_ids[:2048]
-                        batch_rows = gate_weight_fp32.index_select(0, unique_ids)
-                        token_gate_std_batch = batch_rows.std().item()
-                except Exception:
-                    pass
+                
+                # Check how many rows have changed from init value
+                init_value = -1.0
+                row_mean = gate_weight_fp32.mean(dim=1)
+                changed_mask = (row_mean - init_value).abs() > 0.0001
+                changed_count = changed_mask.sum().item()
+                
+                # Print change detection result
+                if not hasattr(self, '_gate_change_count_printed') or \
+                   (hasattr(self, '_last_changed_count') and changed_count != self._last_changed_count):
+                    if changed_count > 0:
+                        changed_rows_mean = row_mean[changed_mask].mean().item()
+                        print(f"\n[GATE CHANGE] {changed_count}/{gate_weight_fp32.shape[0]} rows changed, mean of changed rows: {changed_rows_mean:.6f}")
+                    self._gate_change_count_printed = True
+                    self._last_changed_count = changed_count
+                
                 if gate_weight.grad is not None:
                     token_gate_grad_norm = gate_weight.grad.norm().item()
         except:
