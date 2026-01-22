@@ -1236,16 +1236,12 @@ class _UnslothGRPOTrainer(Trainer):
                 changed_mask = (row_mean - init_value).abs() > 0.0001
                 changed_count = changed_mask.sum().item()
                 
-                # Print change detection result
-                if not hasattr(self, '_gate_change_count_printed') or \
-                   (hasattr(self, '_last_changed_count') and changed_count != self._last_changed_count):
-                    if changed_count > 0:
-                        changed_rows_mean = row_mean[changed_mask].mean().item()
-                        print(f"\n[GATE CHANGE] {changed_count}/{gate_weight_fp32.shape[0]} rows changed, mean of changed rows: {changed_rows_mean:.6f}")
-                    else:
-                        print(f"\n[GATE CHANGE] 0/{gate_weight_fp32.shape[0]} rows changed (all rows still at init value {init_value})")
-                    self._gate_change_count_printed = True
-                    self._last_changed_count = changed_count
+                # Print every step
+                if changed_count > 0:
+                    changed_rows_mean = row_mean[changed_mask].mean().item()
+                    print(f"[GATE] {changed_count} rows changed, mean: {changed_rows_mean:.6f}")
+                else:
+                    print(f"[GATE] 0 rows changed")
                 
                 if gate_weight.grad is not None:
                     token_gate_grad_norm = gate_weight.grad.norm().item()
