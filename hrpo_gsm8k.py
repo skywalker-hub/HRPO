@@ -141,6 +141,40 @@ def main(args):
         args.lr_residual_head,  # 新增: 隐状态变换头的学习率
         args.lr_token_gate_matrix,  # 新增: Token 门控矩阵的学习率
     )
+    
+    # ============ 调试：检查 token_gate_matrix 是否被正确加入优化器 ============
+    print("\n" + "=" * 60)
+    print("调试：检查参数是否在优化器中")
+    print("=" * 60)
+    
+    # 检查所有参数名
+    print("\n【所有包含 'token_gate' 的参数】")
+    found_gate = False
+    for name, param in model.named_parameters():
+        if "token_gate" in name:
+            found_gate = True
+            print(f"  {name}")
+            print(f"    shape: {param.shape}, requires_grad: {param.requires_grad}, dtype: {param.dtype}")
+    if not found_gate:
+        print("  ⚠️ 没有找到任何包含 'token_gate' 的参数！")
+    
+    # 检查优化器中的参数组
+    print("\n【优化器参数组】")
+    trainer.create_optimizer()
+    for i, group in enumerate(trainer.optimizer.param_groups):
+        param_count = len(group['params'])
+        total_params = sum(p.numel() for p in group['params'])
+        print(f"  Group {i}: lr={group['lr']:.2e}, params={param_count}, total={total_params:,}")
+        
+        # 检查是否有 token_gate_matrix 参数
+        for p in group['params']:
+            for name, param in model.named_parameters():
+                if param is p and "token_gate" in name:
+                    print(f"    ✓ 包含 token_gate_matrix (lr={group['lr']:.2e})")
+    
+    print("=" * 60 + "\n")
+    # ============ 调试结束 ============
+    
     trainer.train()
 
 
