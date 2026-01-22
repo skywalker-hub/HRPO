@@ -12,7 +12,7 @@ import os
 # 修改为你的 checkpoint 路径
 CHECKPOINT_PATH = "./test0116.2.0/Qwen2.5-1.5B-Instruct-gsm8k-group2-lora32-rmin0.981-temp0.5/checkpoint-467"
 MODEL_NAME = "/root/autodl-tmp/models/Qwen2.5-1.5B-Instruct"  # 或 "Qwen/Qwen2.5-1.5B-Instruct"
-INIT_VALUE = -3.0  # 初始化值
+INIT_VALUE = -3.0  # 初始化值（改为 -1.0 了）
 # =================================
 
 
@@ -40,18 +40,36 @@ def load_gate_matrix(checkpoint_path):
         raise FileNotFoundError(f"在 {checkpoint_path} 中找不到模型文件")
     
     # 查找 token_gate_matrix
+    # 注意：PEFT 会创建两个版本：
+    #   - original_module.weight (frozen, 不训练)
+    #   - modules_to_save.default.weight (真正训练的)
+    # 我们需要读取 modules_to_save.default.weight！
+    
     gate_weight = None
+    gate_keys = []
     for key, value in state_dict.items():
         if "token_gate_matrix" in key and "weight" in key:
+            gate_keys.append((key, value))
             print(f"找到 key: {key}, shape: {value.shape}")
-            gate_weight = value
-            break
     
-    if gate_weight is None:
+    if not gate_keys:
         print("可用的 keys:")
         for key in state_dict.keys():
             print(f"  {key}")
         raise KeyError("找不到 token_gate_matrix")
+    
+    # 优先选择 modules_to_save.default.weight（真正训练的权重）
+    for key, value in gate_keys:
+        if "modules_to_save" in key:
+            print(f"✓ 使用训练权重: {key}")
+            gate_weight = value
+            break
+    
+    # 如果没有 modules_to_save，则使用找到的第一个（可能是非 PEFT 保存）
+    if gate_weight is None:
+        key, value = gate_keys[0]
+        print(f"⚠ 使用权重（无 modules_to_save）: {key}")
+        gate_weight = value
     
     return gate_weight
 
