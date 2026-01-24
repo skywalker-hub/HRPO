@@ -1231,7 +1231,7 @@ class _UnslothGRPOTrainer(Trainer):
                 token_gate_sigmoid_mean = torch.sigmoid(gate_weight_fp32).mean().item()
                 
                 # Check how many rows have changed from init value
-                init_value = -1.0
+                init_value = -3.0  # 必须与 hrpo_gsm8k.py 中的实际初始化值一致
                 row_mean = gate_weight_fp32.mean(dim=1)
                 changed_mask = (row_mean - init_value).abs() > 0.0001
                 changed_count = changed_mask.sum().item()
