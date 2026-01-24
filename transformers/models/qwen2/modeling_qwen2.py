@@ -466,7 +466,7 @@ QWEN2_INPUTS_DOCSTRING = r"""
 """
 
 
-############## HRPO 参数lamda定义处
+############## HRPO 参数lamda参与计算处
 class ThinkingResidualLambda(nn.Module):
     c = 8.0
 
