@@ -12,7 +12,7 @@ import os
 # 修改为你的 checkpoint 路径
 CHECKPOINT_PATH = "./test0116.2.0.1/Qwen2.5-1.5B-Instruct-gsm8k-group2-lora32-rmin0.981-temp0.5/checkpoint-467"
 MODEL_NAME = "/root/autodl-tmp/models/Qwen2.5-1.5B-Instruct"  # 或 "Qwen/Qwen2.5-1.5B-Instruct"
-INIT_VALUE = -1.0  # 初始化值（改为 -1.0 了）
+INIT_VALUE = -3.0  # 初始化值（改为 -1.0 了）
 # =================================
 
 
