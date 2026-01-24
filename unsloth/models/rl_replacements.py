@@ -543,7 +543,7 @@ def grpo_trainer_compute_loss(function_name, function):
                 token_gate_std = gate_weight_fp32.std().item()
                 token_gate_sigmoid_mean = torch.sigmoid(gate_weight_fp32).mean().item()
                 
-                # Check how many rows have changed from init value
+                # 门控监控：Check how many rows have changed from init value
                 init_value = -1.0
                 row_mean = gate_weight_fp32.mean(dim=1)
                 changed_mask = (row_mean - init_value).abs() > 0.0001
