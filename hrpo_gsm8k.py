@@ -110,7 +110,7 @@ def main(args):
     print(f"  最小值: {gate_weight.min().item():.6f}")
     print(f"  最大值: {gate_weight.max().item():.6f}")
     print(f"  均值: {gate_weight.mean().item():.6f}")
-    print(f"  是否全为-3: {(gate_weight == -1.0).all().item()}")
+    print(f"  是否全为-1: {(gate_weight == -1.0).all().item()}")
     print(f"  sigmoid后的值范围: [{torch.sigmoid(gate_weight).min().item():.6f}, {torch.sigmoid(gate_weight).max().item():.6f}]")
     
     print("=" * 60 + "\n")
