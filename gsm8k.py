@@ -190,7 +190,7 @@ if __name__ == "__main__":
         "lr_residual_gate": 1e-4,
         "lr_residual_Lambda": 1e-3,
         "lr_residual_head": 1e-4,  # 新增: 隐状态变换头的学习率
-        "lr_token_gate_matrix": 1e-4,  # 新增: Token 门控矩阵的学习率
+        "lr_token_gate_matrix": 1e-2,  # 新增: Token 门控矩阵的学习率 (提高以克服bfloat16精度问题)
         "weight_decay": 0.1,
         "warmup_ratio": 0.1,
         "lr_scheduler_type": "cosine",
