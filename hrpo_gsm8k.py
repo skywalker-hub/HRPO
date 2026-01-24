@@ -82,7 +82,7 @@ def main(args):
     
     # ★★★ 真正生效的初始化 ★★★
     nn.init.zeros_(head_trainable_weight)           # thinking_residual_head: 初始化为 0
-    nn.init.constant_(gate_trainable_weight, -2.0)  # 只是建议token_gate_matrix: 初始化为 -3, sigmoid(-3)≈0.047
+    nn.init.constant_(gate_trainable_weight, -1.0)  # 只是建议token_gate_matrix: 初始化为 -3, sigmoid(-3)≈0.047
     # ★★★ 修改上面的值来改变初始化 ★★★
     
     print(f"\n初始化完成:")
