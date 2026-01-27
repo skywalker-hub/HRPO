@@ -80,6 +80,7 @@ def main(args):
     else:
         gate_trainable_weight = gate_module.weight
     
+    #重要超参数：
     # ★★★ 真正生效的初始化 ★★★
     nn.init.normal_(head_trainable_weight, mean=0.0, std=0.001)  # thinking_residual_head: 小正态初始化
     nn.init.constant_(gate_trainable_weight, 0.0)  # 只是建议token_gate_matrix: 初始化为 -3, sigmoid(-3)≈0.047
@@ -208,7 +209,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr_residual_gate", type=float, default=1e-4)
     parser.add_argument("--lr_residual_Lambda", type=float, default=1e-3)
 
-    # 新增: 隐状态变换头的学习率
+    # 重要超参数：新增: 隐状态变换头的学习率
     parser.add_argument("--lr_residual_head", type=float, default=1e-4)  
     # 新增: Token 门控矩阵的学习率 (提高以克服bfloat16精度问题)
     parser.add_argument("--lr_token_gate_matrix", type=float, default=1e-2)  
