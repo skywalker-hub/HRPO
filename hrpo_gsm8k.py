@@ -81,7 +81,7 @@ def main(args):
         gate_trainable_weight = gate_module.weight
     
     # ★★★ 真正生效的初始化 ★★★
-    nn.init.zeros_(head_trainable_weight)           # thinking_residual_head: 初始化为 0
+    nn.init.normal_(head_trainable_weight, mean=0.0, std=0.001)  # thinking_residual_head: 小正态初始化
     nn.init.constant_(gate_trainable_weight, 0.0)  # 只是建议token_gate_matrix: 初始化为 -3, sigmoid(-3)≈0.047
     # ★★★ 修改上面的值来改变初始化 ★★★
     
