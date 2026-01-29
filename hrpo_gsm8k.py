@@ -21,12 +21,6 @@ def preprocess_gsm8k(split="train", chunk_size=1000) -> Dataset:
 
 
 def main(args):
-    exp_name = (f"./test0116.2.0.2/{args.model_name.split('/')[-1]}-gsm8k-group{args.group_size}"
-                f"-lora{args.lora_rank}-lr{args.lr_token_gate_matrix}-rmin{args.residual_r_min}-temp{args.temperature}")
-    if os.path.exists(exp_name) and len(os.listdir(exp_name)) > 0:
-        print(f"Experiment {exp_name} already exists. Exiting...")
-        exit()
-
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name = args.model_name,
         max_seq_length = args.max_prompt_length + args.max_completion_length,
@@ -82,12 +76,21 @@ def main(args):
     
     # ★★★ 真正生效的初始化 ★★★
     nn.init.zeros_(head_trainable_weight)           # thinking_residual_head: 初始化为 0
-    nn.init.constant_(gate_trainable_weight, -3.0)  # token_gate_matrix: 初始化为 -3, sigmoid(-3)≈0.047
+    token_gate_init = -3.0  # 只在这里控制 gate 初始化值（文件名/检查都引用该值）
+    nn.init.constant_(gate_trainable_weight, token_gate_init)  # token_gate_matrix: 初始化为 -3, sigmoid(-3)≈0.047
     # ★★★ 修改上面的值来改变初始化 ★★★
     
     print(f"\n初始化完成:")
     print(f"  thinking_residual_head: 使用 {'modules_to_save.default' if hasattr(head_module, 'modules_to_save') else 'weight'}")
     print(f"  token_gate_matrix: 使用 {'modules_to_save.default' if hasattr(gate_module, 'modules_to_save') else 'weight'}")
+
+    ###保存文件名（init 统一使用上面 token_gate_init）
+    exp_name = (f"./test0116.2.0.2/{args.model_name.split('/')[-1]}-gsm8k-group{args.group_size}"
+                f"-lora{args.lora_rank}-lr{args.lr_token_gate_matrix}-init{token_gate_init:g}"
+                f"-rmin{args.residual_r_min}-temp{args.temperature}")
+    if os.path.exists(exp_name) and len(os.listdir(exp_name)) > 0:
+        print(f"Experiment {exp_name} already exists. Exiting...")
+        exit()
 
     # ============ 打印新加入矩阵的初始值情况 ============
     print("\n" + "=" * 60)
@@ -110,7 +113,8 @@ def main(args):
     print(f"  最小值: {gate_weight.min().item():.6f}")
     print(f"  最大值: {gate_weight.max().item():.6f}")
     print(f"  均值: {gate_weight.mean().item():.6f}")
-    print(f"  是否全为-3: {(gate_weight == -1.0).all().item()}")
+    expected_gate = torch.full_like(gate_weight, float(token_gate_init))
+    print(f"  是否全为{token_gate_init:g}: {torch.allclose(gate_weight, expected_gate)}")
     print(f"  sigmoid后的值范围: [{torch.sigmoid(gate_weight).min().item():.6f}, {torch.sigmoid(gate_weight).max().item():.6f}]")
     
     print("=" * 60 + "\n")
