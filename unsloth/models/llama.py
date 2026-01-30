@@ -939,6 +939,8 @@ def LlamaModel_fast_forward_inference(
 
     is_thinking = kwargs.get('is_thinking')
     last_thinking_states = kwargs.get('last_thinking_states')
+
+    #### HRPO调用处
     if is_thinking is not None and last_thinking_states is not None:
         thinking_embeds = last_thinking_states
         X_hat, a_t = self.model.thinking_residual(
