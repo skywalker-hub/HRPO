@@ -78,7 +78,7 @@ def main(args):
     nn.init.zeros_(head_trainable_weight)  # thinking_residual_head: 初始化为 0
 
     ###门控初始化
-    token_gate_init = -1.0  # 只在这里控制 gate 初始化值（文件名/检查都引用该值）
+    token_gate_init = -2.0  # 只在这里控制 gate 初始化值（文件名/检查都引用该值）
     nn.init.constant_(gate_trainable_weight, token_gate_init)  # token_gate_matrix: 初始化为 -3, sigmoid(-3)≈0.047
     # ★★★ 修改上面的值来改变初始化 ★★★
     
