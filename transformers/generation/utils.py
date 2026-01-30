@@ -3383,21 +3383,11 @@ class GenerationMixin:
             strs = processing_class.batch_decode(input_ids[:, input_len:])
             is_thinking = [self.answer_start not in s for s in strs]
             
-            # 直接使用原始隐状态，thinking_residual_head 会在 thinking_residual() 函数内被调用
-            if outputs.hidden_states is not None and len(outputs.hidden_states) > 3:
-                hs = outputs.hidden_states[3]  # 原始隐状态 X
-                # prefill 阶段返回的是标准 hidden_states 元组，形状为 [batch, seq_len, hidden]
-                # 推理阶段返回的是自定义列表，形状为 [batch, hidden]
-                if hs.dim() == 3:  # prefill 阶段
-                    last_thinking_states = hs[:, -1, :]  # 只取最后一个 token
-                else:  # 推理阶段
-                    last_thinking_states = hs
-            else:################### HRPO的隐藏状态计算
-                # Fallback
-                last_thinking_states = torch.einsum(
-                    'bv,vd->bd', probs, self.get_input_embeddings().weight
-                )
-                last_thinking_states /= torch.sqrt((probs ** 2).sum(-1, keepdim=True)).to(last_thinking_states.dtype)
+            ################### HRPO的隐藏状态计算：统一使用 probs 和 embedding weight 计算方式
+            last_thinking_states = torch.einsum(
+                'bv,vd->bd', probs, self.get_input_embeddings().weight
+            )
+            last_thinking_states /= torch.sqrt((probs ** 2).sum(-1, keepdim=True)).to(last_thinking_states.dtype)
 
             if return_thinking_embeds and outputs.hidden_states is not None:
                 thinking_embeds.append(outputs.hidden_states[0].unsqueeze(1))
