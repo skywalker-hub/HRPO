@@ -543,6 +543,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
         self.embed_tokens = value
 
     #####主断点：HRPO核心计算函数
+    #####embeds:最后一个词嵌入向量，residual此时为上一步的隐藏状态
     def thinking_residual(self, embeds, residual, input_ids=None, eps=1e-8):
         """
         混合推理残差计算函数
