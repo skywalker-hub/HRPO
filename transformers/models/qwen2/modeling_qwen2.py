@@ -561,7 +561,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
         r_t = torch.sigmoid(self.thinking_residual_gate_r(embeds))
         i_t = torch.sigmoid(self.thinking_residual_gate_i(embeds))  # 保留 i_t 定义，但不再使用
         a_t = self.thinking_residual_Lambda(r_t)
-        h_residual = self.thinking_residual_head(residual)  # 连续信息向量
+        h_residual = residual  # 连续信息向量
         
         # 新增：基于 token ID 的离散门控
         # g_k = sigmoid(lookup(k))，形状 (batch, seq_len, hidden_size)
