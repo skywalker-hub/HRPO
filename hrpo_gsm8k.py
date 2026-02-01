@@ -78,7 +78,7 @@ def main(args):
     nn.init.zeros_(head_trainable_weight)  # thinking_residual_head: 初始化为 0
 
     ###门控初始化
-    token_gate_init = -3.0  # 只在这里控制 gate 初始化值（文件名/检查都引用该值）
+    token_gate_init = -2.5  # 只在这里控制 gate 初始化值（文件名/检查都引用该值）
     nn.init.constant_(gate_trainable_weight, token_gate_init)  # token_gate_matrix: 初始化为 -3, sigmoid(-3)≈0.047
     # ★★★ 修改上面的值来改变初始化 ★★★
     
@@ -217,7 +217,7 @@ if __name__ == "__main__":
     # 新增: 隐状态变换头的学习率
     parser.add_argument("--lr_residual_head", type=float, default=1e-4)  
     # 新增: Token 门控矩阵的学习率 (提高以克服bfloat16精度问题)
-    parser.add_argument("--lr_token_gate_matrix", type=float, default=1e-2)  
+    parser.add_argument("--lr_token_gate_matrix", type=float, default=1e-3)  
     
     parser.add_argument("--weight_decay", type=float, default=0.1)
     parser.add_argument("--warmup_ratio", type=float, default=0.1)
