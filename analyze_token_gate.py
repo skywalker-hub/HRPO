@@ -6,7 +6,7 @@
 import torch
 import numpy as np
 from transformers import AutoTokenizer
-import os
+import os 
 
 # ============ 配置区域 ============
 # 修改为你的 checkpoint 路径
