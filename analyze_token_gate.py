@@ -83,7 +83,7 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
     print(f"{'='*60}")
     
     # 1. 基本统计
-    print(f"\n[Overall stats]")
+    print(f"\n[1. Overall stats]")
     print(f"  Mean: {gate_weight.mean().item():.6f}")
     print(f"  Std: {gate_weight.std().item():.6f}")
     print(f"  Min: {gate_weight.min().item():.6f}")
@@ -98,7 +98,7 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
     delta_from_init = (gate_weight - init_value).abs().mean(dim=1)  # 每个 token 偏离初始值的程度
     
     # 4. 找出变化最大的 token
-    print(f"\n[Top 20 most changed tokens] (largest deviation from init {init_value})")
+    print(f"\n[2. Top 20 most changed tokens] (largest deviation from init {init_value})")
     top_changed = delta_from_init.topk(20)
     print(f"{'Token ID':>10} | {'Token':>20} | {'Deviation':>10} | {'Mean':>10} | {'SigmoidMean':>12}")
     print("-" * 70)
@@ -113,7 +113,7 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
         print(f"{token_id:>10} | {token_str:>20} | {delta.item():>10.6f} | {mean_val:>10.6f} | {sigmoid_val:>12.6f}")
     
     # 5. 找出门控最开放的 token（sigmoid 最大）
-    print(f"\n[Top 20 most open tokens] (largest sigmoid mean)")
+    print(f"\n[3. Top 20 most open tokens] (largest sigmoid mean)")
     top_open = row_sigmoid_mean.topk(20)
     print(f"{'Token ID':>10} | {'Token':>20} | {'SigmoidMean':>12} | {'RawMean':>10}")
     print("-" * 60)
@@ -127,7 +127,7 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
         print(f"{token_id:>10} | {token_str:>20} | {val.item():>12.6f} | {mean_val:>10.6f}")
     
     # 6. 找出门控最关闭的 token（sigmoid 最小）
-    print(f"\n[Top 20 most closed tokens] (smallest sigmoid mean)")
+    print(f"\n[4. Top 20 most closed tokens] (smallest sigmoid mean)")
     bottom_closed = row_sigmoid_mean.topk(20, largest=False)
     print(f"{'Token ID':>10} | {'Token':>20} | {'SigmoidMean':>12} | {'RawMean':>10}")
     print("-" * 60)
@@ -141,7 +141,7 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
         print(f"{token_id:>10} | {token_str:>20} | {val.item():>12.6f} | {mean_val:>10.6f}")
     
     # 7. 分析特定类型的 token
-    print(f"\n[Specific token type analysis]")
+    print(f"\n[5. Specific token type analysis]")
     
     # 数字 token
     digit_tokens = []
@@ -181,11 +181,11 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
     # 8. 统计有多少 token 发生了显著变化
     threshold = 0.01  # 偏离阈值
     changed_count = (delta_from_init > threshold).sum().item()
-    print(f"\n[Change statistics]")
+    print(f"\n[6. Change statistics]")
     print(f"  Tokens with deviation > {threshold}: {changed_count} / {vocab_size} ({100*changed_count/vocab_size:.2f}%)")
     
     # 9. 打印指定 token 的详细门控向量
-    print(f"\n[Detailed gate vectors for selected tokens (first 20 dims)]")
+    print(f"\n[7. Detailed gate vectors for selected tokens (first 20 dims)]")
     sample_tokens = ['0', '1', '2', '+', '-', '=', 'the', 'answer', '\n']
     for token_str in sample_tokens:
         tokens = tokenizer.encode(token_str, add_special_tokens=False)
