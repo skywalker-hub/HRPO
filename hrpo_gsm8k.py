@@ -78,7 +78,7 @@ def main(args):
     nn.init.zeros_(head_trainable_weight)  # thinking_residual_head: 初始化为 0
 
     ###门控初始化
-    token_gate_init = -3.0  # 只在这里控制 gate 初始化值（文件名/检查都引用该值）
+    token_gate_init = -2.5  # 只在这里控制 gate 初始化值（文件名/检查都引用该值）
     nn.init.constant_(gate_trainable_weight, token_gate_init)  # token_gate_matrix: 初始化为 -3, sigmoid(-3)≈0.047
     # ★★★ 修改上面的值来改变初始化 ★★★
     
@@ -228,8 +228,8 @@ if __name__ == "__main__":
     parser.add_argument("--group_size", type=int, default=4)
     parser.add_argument("--temperature", type=float, default=0.5)
 
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=4)
-    parser.add_argument("--per_device_train_batch_size", type=int, default=8)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=2)
+    parser.add_argument("--per_device_train_batch_size", type=int, default=16)
 
     parser.add_argument("--max_prompt_length", type=int, default=1024)
     parser.add_argument("--max_completion_length", type=int, default=1024)
