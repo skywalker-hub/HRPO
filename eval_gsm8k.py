@@ -43,6 +43,7 @@ def evaluate_model(
     results = []
     correct = 0
     total = 0
+    total_gen_tokens = 0  # 累计生成的token总数
 
     progress_bar = tqdm(
         total=total_samples,
@@ -97,6 +98,11 @@ def evaluate_model(
             is_inference=is_inference,
         )
 
+        # 统计本batch每条样本的生成token数
+        for output in outputs:
+            gen_tokens = len(output[prompt_length:])
+            total_gen_tokens += gen_tokens
+
         # Process each generated response
         for j, output in enumerate(outputs):
             response = tokenizer.decode(output[prompt_length:])
@@ -125,18 +131,23 @@ def evaluate_model(
                 correct += 1
             total += 1
 
+        avg_gen_len = total_gen_tokens / total if total > 0 else 0
         progress_bar.update(current_batch_size)
         progress_bar.set_postfix({
             'acc': f'{(correct/total)*100:.2f}%',
             'correct': f'{correct}/{total}',
+            'avg_len': f'{avg_gen_len:.1f}',
         })
 
     progress_bar.close()
     accuracy = correct / total if total > 0 else 0
+    avg_gen_len = total_gen_tokens / total if total > 0 else 0
+    print(f"\nFinal average generation length: {avg_gen_len:.1f} tokens")
     metrics = {
         'accuracy': accuracy,
         'correct': correct,
         'total': total,
+        'avg_gen_length': avg_gen_len,
         'model_path': adapter_path,
         'timestamp': datetime.now().isoformat()
     }
