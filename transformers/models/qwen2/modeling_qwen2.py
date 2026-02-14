@@ -546,33 +546,29 @@ class Qwen2Model(Qwen2PreTrainedModel):
     #####embeds:最后一个词嵌入向量，residual此时为上一步的隐藏状态
     def thinking_residual(self, embeds, residual, input_ids=None, eps=1e-8):
         """
-        混合推理残差计算函数
+        基于自适应通道门控的球面混合推理 (Adaptive Spherical Hybrid Reasoning via Channel-wise Gating)
         
         Args:
-            embeds: 当前 token 的嵌入向量 (batch, seq_len, hidden_size)
-            residual: 上一步的隐藏状态 (batch, seq_len, hidden_size)
-            input_ids: 当前 token 的 ID (batch, seq_len)，用于查询门控矩阵
+            embeds: 当前 token 的嵌入向量 e_t (batch, seq_len, hidden_size)
+            residual: 上一步的原始隐藏状态 ĥ_{t-1} (batch, seq_len, hidden_size)
+            input_ids: 当前 token 的 ID x_t (batch, seq_len)，用于查询门控嵌入矩阵
             eps: 数值稳定性参数
         
         Returns:
-            new_embeds: 混合后的嵌入向量
-            a_t: 衰减系数
+            new_embeds: 混合后的嵌入向量 e'_t
+            g_t: 自适应通道门控向量 (batch, seq_len, hidden_size)
         """
-        r_t = torch.sigmoid(self.thinking_residual_gate_r(embeds))
-        i_t = torch.sigmoid(self.thinking_residual_gate_i(embeds))  # 保留 i_t 定义，但不再使用
-        a_t = self.thinking_residual_Lambda(r_t)
+        ####修改点1：移除 r_t, i_t, a_t 计算，不再使用 ThinkingResidualLambda 衰减系数方案
         
-        # ★ 关键修复：对 residual 做 RMSNorm 归一化后再送入 head
-        # 原因：residual 是 Transformer 隐藏状态，范数可达数百~数千，
-        # 导致 ∂L/∂W = grad^T × residual 中梯度被 ||residual|| 放大。
-        # 归一化后 ||residual_normed|| ≈ 1，梯度范数仅取决于 upstream grad。
+        # 步骤1：潜在思维流对齐 (Latent Thought Alignment)
+        # h_t = W_head · RMSNorm(ĥ_{t-1})
+        # 对 residual 做 RMSNorm 归一化后再送入 head
         residual_variance = residual.to(torch.float32).pow(2).mean(-1, keepdim=True)
         residual_normed = residual * torch.rsqrt(residual_variance + eps)
-        h_residual = self.thinking_residual_head(residual_normed.to(residual.dtype))  # 连续信息向量
+        h_t = self.thinking_residual_head(residual_normed.to(residual.dtype))
 
-
-        # 新增：基于 token ID 的离散门控
-        # g_k = sigmoid(lookup(k))，形状 (batch, seq_len, hidden_size)
+        # 步骤2：自适应通道门控生成 (Adaptive Channel-wise Gate Generation)
+        # g_t = σ(E_gate[x_t])，形状 (batch, seq_len, hidden_size)
         if input_ids is not None:
             # Debug: record if input_ids is passed (print once in training mode)
             if self.training and not hasattr(self, '_gate_debug_printed'):
@@ -582,19 +578,20 @@ class Qwen2Model(Qwen2PreTrainedModel):
                 self._gate_debug_printed = True
             
             gate_logits = self.token_gate_matrix(input_ids)  # (batch, seq_len, hidden_size)
-            g_k = torch.sigmoid(gate_logits)
+            g_t = torch.sigmoid(gate_logits)
         else:
             # Debug: if input_ids is None
             if self.training and not hasattr(self, '_gate_none_debug_printed'):
                 print(f"\n[WARNING] token_gate_matrix NOT called! input_ids is None")
                 self._gate_none_debug_printed = True
             # 如果没有提供 input_ids，回退到全 1 门控（相当于不过滤）
-            g_k = torch.ones_like(h_residual)
+            g_t = torch.ones_like(h_t)
         
-        # continuous_bias = h_residual * g_k，替代原来的 i_t * h_residual
-        continuous_bias = h_residual * g_k
-        
-        return a_t * embeds + torch.sqrt(1 - a_t.pow(2) + eps) * continuous_bias, a_t
+        ####修改点2：使用逐元素球面插值混合替代原 a_t 衰减系数方案
+        # 步骤3：逐元素球面插值混合 (Element-wise Spherical Interpolation Mixing)
+        # e'_t = sqrt(1 - g_t² + ε) ⊙ e_t + g_t ⊙ h_t
+        # 每个特征通道独立利用 cos²θ + sin²θ = 1 的几何性质保证混合后方差恒定
+        return torch.sqrt(1 - g_t.pow(2) + eps) * embeds + g_t * h_t, g_t
 
     @add_start_docstrings_to_model_forward(QWEN2_INPUTS_DOCSTRING)
     def forward(
