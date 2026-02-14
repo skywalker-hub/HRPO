@@ -594,7 +594,9 @@ class Qwen2Model(Qwen2PreTrainedModel):
         # continuous_bias = h_residual * g_k，替代原来的 i_t * h_residual
         continuous_bias = h_residual * g_k
         
-        return a_t * embeds + torch.sqrt(1 - a_t.pow(2) + eps) * continuous_bias, a_t
+        discrete_thinking = a_t * embeds
+        continuous_thinking = torch.sqrt(1 - a_t.pow(2) + eps) * continuous_bias
+        return discrete_thinking + continuous_thinking, a_t
 
     @add_start_docstrings_to_model_forward(QWEN2_INPUTS_DOCSTRING)
     def forward(
