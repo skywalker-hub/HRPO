@@ -606,7 +606,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
                 total_norm = discrete_norm + continuous_norm + eps
                 self._discrete_norm = discrete_norm.item()
                 self._continuous_norm = continuous_norm.item()
-                self._thinking_norm_ratio = discrete_norm.item() / total_norm.item()
+                self._thinking_norm_ratio = continuous_norm.item() / total_norm.item()
 
         return discrete_thinking + continuous_thinking, a_t
 
