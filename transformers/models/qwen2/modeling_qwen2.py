@@ -596,6 +596,18 @@ class Qwen2Model(Qwen2PreTrainedModel):
         
         discrete_thinking = a_t * embeds
         continuous_thinking = torch.sqrt(1 - a_t.pow(2) + eps) * continuous_bias
+
+        # 监控：计算离散/连续思维的模值比例（detach 避免影响梯度）
+        if self.training:
+            with torch.no_grad():
+                discrete_norm = discrete_thinking.detach().norm(dim=-1).mean()
+                continuous_norm = continuous_thinking.detach().norm(dim=-1).mean()
+                # 比例: discrete / (discrete + continuous)，值域 [0, 1]
+                total_norm = discrete_norm + continuous_norm + eps
+                self._discrete_norm = discrete_norm.item()
+                self._continuous_norm = continuous_norm.item()
+                self._thinking_norm_ratio = discrete_norm.item() / total_norm.item()
+
         return discrete_thinking + continuous_thinking, a_t
 
     @add_start_docstrings_to_model_forward(QWEN2_INPUTS_DOCSTRING)

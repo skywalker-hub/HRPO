@@ -504,6 +504,10 @@ def grpo_trainer_compute_loss(function_name, function):
         token_gate_std = 0.0
         token_gate_sigmoid_mean = 0.0
         token_gate_std_batch = 0.0
+        # 获取 discrete/continuous thinking 模值比例
+        discrete_norm = 0.0
+        continuous_norm = 0.0
+        thinking_norm_ratio = 0.0
         try:
             base_model = self.model
             while hasattr(base_model, 'model'):
@@ -558,6 +562,10 @@ def grpo_trainer_compute_loss(function_name, function):
                 
                 if gate_weight.grad is not None:
                     token_gate_grad_norm = gate_weight.grad.norm().item()
+            # 读取 discrete/continuous thinking 的模值比例
+            discrete_norm = getattr(base_model, '_discrete_norm', 0.0)
+            continuous_norm = getattr(base_model, '_continuous_norm', 0.0)
+            thinking_norm_ratio = getattr(base_model, '_thinking_norm_ratio', 0.0)
         except:
             pass
 
@@ -578,6 +586,10 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics[mode]["token_gate_std"].append(token_gate_std)
             self._metrics[mode]["token_gate_sigmoid_mean"].append(token_gate_sigmoid_mean)
             self._metrics[mode]["token_gate_std_batch"].append(token_gate_std_batch)
+            # discrete/continuous thinking 模值监控
+            self._metrics[mode]["discrete_norm"].append(discrete_norm)
+            self._metrics[mode]["continuous_norm"].append(continuous_norm)
+            self._metrics[mode]["thinking_norm_ratio"].append(thinking_norm_ratio)
         else:
             self._metrics["embeds_ratio"].append(mean_embeds_ratio.item())
             self._metrics["hidden_ratio"].append(mean_hidden_ratio.item())
@@ -594,6 +606,10 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics["token_gate_std"].append(token_gate_std)
             self._metrics["token_gate_sigmoid_mean"].append(token_gate_sigmoid_mean)
             self._metrics["token_gate_std_batch"].append(token_gate_std_batch)
+            # discrete/continuous thinking 模值监控
+            self._metrics["discrete_norm"].append(discrete_norm)
+            self._metrics["continuous_norm"].append(continuous_norm)
+            self._metrics["thinking_norm_ratio"].append(thinking_norm_ratio)
         return loss
     pass
 
