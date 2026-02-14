@@ -531,7 +531,11 @@ class Qwen2Model(Qwen2PreTrainedModel):
         r_t = torch.sigmoid(self.thinking_residual_gate_r(embeds))
         i_t = torch.sigmoid(self.thinking_residual_gate_i(embeds))
         a_t = self.thinking_residual_Lambda(r_t)
-        return a_t * embeds + torch.sqrt(1 - a_t.pow(2) + eps) * (i_t * residual), a_t
+        # 离散思维 (discrete thinking)
+        discrete_thinking = a_t * embeds
+        # 连续思维 (continuous thinking)
+        continuous_thinking = torch.sqrt(1 - a_t.pow(2) + eps) * (i_t * residual)
+        return discrete_thinking + continuous_thinking, a_t
 
     @add_start_docstrings_to_model_forward(QWEN2_INPUTS_DOCSTRING)
     def forward(
