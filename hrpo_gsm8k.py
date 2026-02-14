@@ -87,7 +87,7 @@ def main(args):
     print(f"  token_gate_matrix: 使用 {'modules_to_save.default' if hasattr(gate_module, 'modules_to_save') else 'weight'}")
 
     ###保存文件名（init 统一使用上面 token_gate_init）
-    exp_name = (f"./test0116.2.0.2(2)/{args.model_name.split('/')[-1]}-gsm8k-group{args.group_size}"
+    exp_name = (f"./test0116.4.0/{args.model_name.split('/')[-1]}-gsm8k-group{args.group_size}"
                 f"-lora{args.lora_rank}-lr{args.lr_token_gate_matrix}-init{token_gate_init:g}"
                 f"-rmin{args.residual_r_min}-temp{args.temperature}")
     if os.path.exists(exp_name) and len(os.listdir(exp_name)) > 0:
@@ -228,8 +228,8 @@ if __name__ == "__main__":
     parser.add_argument("--group_size", type=int, default=4)
     parser.add_argument("--temperature", type=float, default=0.5)
 
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=2)
-    parser.add_argument("--per_device_train_batch_size", type=int, default=16)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=4)
+    parser.add_argument("--per_device_train_batch_size", type=int, default=8)
 
     parser.add_argument("--max_prompt_length", type=int, default=1024)
     parser.add_argument("--max_completion_length", type=int, default=1024)
