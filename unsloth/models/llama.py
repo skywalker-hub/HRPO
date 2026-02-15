@@ -955,7 +955,7 @@ def LlamaModel_fast_forward_inference(
             input_ids=input_ids,
         )
 
-        embeds_ratio = a_t.mean(-1).squeeze()
+        embeds_ratio = a_t.mean(-1).view(-1)  # 用 view(-1) 替代 squeeze()，避免 bsz=1 时变成 0 维标量
         embeds_ratio[~torch.tensor(is_thinking)] = 1.
         X[is_thinking] = X_hat[is_thinking].to(X.dtype)
 

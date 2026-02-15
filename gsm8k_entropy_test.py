@@ -82,7 +82,8 @@ def run_entropy_test(
     prompt_mask = prompt_inputs["attention_mask"].to(model.device)
     prompt_length = prompt_ids.size(1)
 
-    # ---- 3. 生成回复（与 eval_gsm8k.py 一致的参数）----
+    # ---- 3. 生成回复，同时收集每步 logits ----
+    # output_scores=True 让 generate() 在每步前向传播时记录 logits 并通过返回值返回
     print("\n正在生成回复...")
     with torch.no_grad():
         outputs = model.generate(
@@ -92,14 +93,15 @@ def run_entropy_test(
                 do_sample=True,
                 temperature=temperature,
                 max_new_tokens=512,
-                output_hidden_states=True,
+                output_scores=True,
+                return_dict_in_generate=True,
             ),
             processing_class=tokenizer,
             is_inference=is_inference,
         )
 
     # ---- 4. 解码文本 ----
-    generated_ids = outputs[0][prompt_length:]
+    generated_ids = outputs.sequences[0][prompt_length:]
     response_text = tokenizer.decode(generated_ids)
     response_text = response_text.split(
         tokenizer.special_tokens_map["eos_token"]
@@ -116,30 +118,18 @@ def run_entropy_test(
     print(f"\n【提取的答案】{generated_answer}")
     print("=" * 60)
 
-    # ---- 5. 前向传播获取 logits，逐步计算信息熵 ----
-    # 对完整序列（prompt + 生成）做一次前向传播，因果注意力保证每个位置
-    # 只看到它之前的 token，与自回归生成时完全一致
-    full_ids = outputs[0].unsqueeze(0)  # (1, seq_len)
-    print("\n正在计算信息熵（前向传播）...")
-    with torch.no_grad():
-        model_outputs = model(full_ids)
-        all_logits = model_outputs.logits  # (1, seq_len, vocab_size)
-
-    # logits[t] 预测 token[t+1]，所以：
-    #   all_logits[0, prompt_length-1] 预测第 1 个生成 token
-    #   all_logits[0, prompt_length]   预测第 2 个生成 token ...
-    num_gen_tokens = len(generated_ids)
-    gen_logits = all_logits[0, prompt_length - 1 : prompt_length - 1 + num_gen_tokens, :]
-
-    # 应用 temperature（与生成时一致）
-    gen_logits = gen_logits / temperature
-
-    num_steps = gen_logits.size(0)
+    # ---- 5. 从 scores 逐步计算信息熵 ----
+    # outputs.scores 是一个 tuple，每个元素 shape (1, vocab_size)，对应每步的 logits
+    # 注意：这些 logits 已经是 temperature 缩放前的原始值，generate 内部会再做 temperature
+    # 因此这里手动除以 temperature 以反映实际采样时的概率分布
+    scores = outputs.scores
+    num_steps = len(scores)
     entropies = []
     tokens_text = []
 
     for step_idx in range(num_steps):
-        entropy = compute_entropy(gen_logits[step_idx])
+        logits = scores[step_idx] / temperature  # 应用 temperature
+        entropy = compute_entropy(logits)
         entropies.append(entropy)
 
         token_id = generated_ids[step_idx].item()
