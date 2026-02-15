@@ -61,13 +61,15 @@ def run_entropy_test(
     model = FastLanguageModel.for_inference(model)
 
     # ---- 1.5 提取 token_gate_matrix，预计算每个 token 的 sigmoid 均值 ----
-    gate_module = model.model.model.token_gate_matrix
-    if hasattr(gate_module, 'modules_to_save'):
-        gate_weight = gate_module.modules_to_save.default.weight.data
-    else:
-        gate_weight = gate_module.weight.data
+    gate_weight = None
+    for name, param in model.named_parameters():
+        if "token_gate_matrix" in name and "weight" in name:
+            gate_weight = param.data
+            print(f"找到 token_gate_matrix: {name}, shape={gate_weight.shape}")
+            break
+    if gate_weight is None:
+        raise RuntimeError("未找到 token_gate_matrix 权重，请检查模型/adapter")
     row_sigmoid_mean = torch.sigmoid(gate_weight).mean(dim=1)  # (vocab_size,)
-    print(f"已加载 token_gate_matrix, shape={gate_weight.shape}")
 
     # ---- 2. 构造 Prompt ----
     prompt = [
