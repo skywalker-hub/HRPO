@@ -136,25 +136,15 @@ def run_entropy_test(
         token_str = tokenizer.decode([token_id])
         tokens_text.append(token_str)
 
-    # 打印前 30 步和最后 10 步的详细信息
+    # 打印所有步骤的熵
     print(f"\n共生成 {num_steps} 个 token")
-    print("-" * 50)
+    print("-" * 60)
     print(f"{'Step':>5}  {'Entropy':>10}  Token")
-    print("-" * 50)
-    display_steps = list(range(min(30, num_steps)))
-    if num_steps > 40:
-        display_steps.append(None)  # 省略标记
-        display_steps.extend(range(num_steps - 10, num_steps))
-    elif num_steps > 30:
-        display_steps.extend(range(30, num_steps))
-
-    for step_idx in display_steps:
-        if step_idx is None:
-            print(f"  ...   {'...':>10}  ...")
-        else:
-            token_repr = repr(tokens_text[step_idx])
-            print(f"{step_idx + 1:>5}  {entropies[step_idx]:>10.4f}  {token_repr}")
-    print("-" * 50)
+    print("-" * 60)
+    for step_idx in range(num_steps):
+        token_repr = repr(tokens_text[step_idx])
+        print(f"{step_idx + 1:>5}  {entropies[step_idx]:>10.4f}  {token_repr}")
+    print("-" * 60)
 
     # 统计摘要
     ent_array = np.array(entropies)
@@ -163,6 +153,18 @@ def run_entropy_test(
     print(f"  标准差: {ent_array.std():.4f}")
     print(f"  最小值: {ent_array.min():.4f} (step {ent_array.argmin() + 1})")
     print(f"  最大值: {ent_array.max():.4f} (step {ent_array.argmax() + 1})")
+
+    # 打印熵最高的 Top-20 步骤
+    top_k = min(20, num_steps)
+    top_indices = np.argsort(ent_array)[::-1][:top_k]
+    print(f"\n熵最高的 Top-{top_k} 步骤:")
+    print("-" * 60)
+    print(f"{'Rank':>4}  {'Step':>5}  {'Entropy':>10}  Token")
+    print("-" * 60)
+    for rank, idx in enumerate(top_indices):
+        token_repr = repr(tokens_text[idx])
+        print(f"{rank + 1:>4}  {idx + 1:>5}  {entropies[idx]:>10.4f}  {token_repr}")
+    print("-" * 60)
 
     # ---- 6. 绘制折线图 ----
     fig, ax = plt.subplots(figsize=(14, 5))
