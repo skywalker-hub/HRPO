@@ -222,7 +222,7 @@ def run_entropy_test(
 if __name__ == "__main__":
     # ====== 在此处手动修改参数，直接运行即可调试 ======
     checkpoint_path = "/root/autodl-tmp/HRPO/test0116.2.0.4/Qwen2.5-1.5B-Instruct-gsm8k-group4-lora32-lr0.01-init-2-rmin0.981-temp0.5/checkpoint-934"  # 修改为你的 adapter 路径
-    temperature = 0.9
+    temperature = 0.5
     is_inference = True   # True = greedy, False = sampling
     # ================================================
 
