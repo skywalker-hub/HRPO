@@ -60,6 +60,15 @@ def run_entropy_test(
     model.load_adapter(adapter_path)
     model = FastLanguageModel.for_inference(model)
 
+    # ---- 1.5 提取 token_gate_matrix，预计算每个 token 的 sigmoid 均值 ----
+    gate_module = model.model.model.token_gate_matrix
+    if hasattr(gate_module, 'modules_to_save'):
+        gate_weight = gate_module.modules_to_save.default.weight.data
+    else:
+        gate_weight = gate_module.weight.data
+    row_sigmoid_mean = torch.sigmoid(gate_weight).mean(dim=1)  # (vocab_size,)
+    print(f"已加载 token_gate_matrix, shape={gate_weight.shape}")
+
     # ---- 2. 构造 Prompt ----
     prompt = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -125,6 +134,7 @@ def run_entropy_test(
     scores = outputs.scores
     num_steps = len(scores)
     entropies = []
+    gate_values = []
     tokens_text = []
 
     for step_idx in range(num_steps):
@@ -135,41 +145,60 @@ def run_entropy_test(
         token_id = generated_ids[step_idx].item()
         token_str = tokenizer.decode([token_id])
         tokens_text.append(token_str)
+        gate_values.append(row_sigmoid_mean[token_id].item())
 
-    # 打印所有步骤的熵
+    # 打印所有步骤的熵和门控值
     print(f"\n共生成 {num_steps} 个 token")
-    print("-" * 60)
-    print(f"{'Step':>5}  {'Entropy':>10}  Token")
-    print("-" * 60)
+    print("-" * 80)
+    print(f"{'Step':>5}  {'Entropy':>10}  {'GateSigm':>10}  Token")
+    print("-" * 80)
     for step_idx in range(num_steps):
         token_repr = repr(tokens_text[step_idx])
-        print(f"{step_idx + 1:>5}  {entropies[step_idx]:>10.4f}  {token_repr}")
-    print("-" * 60)
+        print(f"{step_idx + 1:>5}  {entropies[step_idx]:>10.4f}  {gate_values[step_idx]:>10.6f}  {token_repr}")
+    print("-" * 80)
 
     # 统计摘要
     ent_array = np.array(entropies)
+    gate_array = np.array(gate_values)
     print(f"\n信息熵统计:")
     print(f"  平均值: {ent_array.mean():.4f}")
     print(f"  标准差: {ent_array.std():.4f}")
     print(f"  最小值: {ent_array.min():.4f} (step {ent_array.argmin() + 1})")
     print(f"  最大值: {ent_array.max():.4f} (step {ent_array.argmax() + 1})")
+    print(f"\nToken Gate Sigmoid 统计:")
+    print(f"  平均值: {gate_array.mean():.6f}")
+    print(f"  最小值: {gate_array.min():.6f} (step {gate_array.argmin() + 1})")
+    print(f"  最大值: {gate_array.max():.6f} (step {gate_array.argmax() + 1})")
 
     # 打印熵最高的 Top-20 步骤
     top_k = min(20, num_steps)
     top_indices = np.argsort(ent_array)[::-1][:top_k]
     print(f"\n熵最高的 Top-{top_k} 步骤:")
-    print("-" * 60)
-    print(f"{'Rank':>4}  {'Step':>5}  {'Entropy':>10}  Token")
-    print("-" * 60)
+    print("-" * 80)
+    print(f"{'Rank':>4}  {'Step':>5}  {'Entropy':>10}  {'GateSigm':>10}  Token")
+    print("-" * 80)
     for rank, idx in enumerate(top_indices):
         token_repr = repr(tokens_text[idx])
-        print(f"{rank + 1:>4}  {idx + 1:>5}  {entropies[idx]:>10.4f}  {token_repr}")
-    print("-" * 60)
+        print(f"{rank + 1:>4}  {idx + 1:>5}  {entropies[idx]:>10.4f}  {gate_values[idx]:>10.6f}  {token_repr}")
+    print("-" * 80)
 
-    # ---- 6. 绘制折线图 ----
-    fig, ax = plt.subplots(figsize=(14, 5))
+    # ---- 6. 绘制折线图（双 Y 轴：Entropy + Gate Sigmoid）----
+    fig, ax1 = plt.subplots(figsize=(14, 5))
     steps = np.arange(1, num_steps + 1)
-    ax.plot(steps, entropies, linewidth=0.8, color="steelblue", alpha=0.9)
+
+    # 左 Y 轴：Entropy
+    color_entropy = "steelblue"
+    ax1.plot(steps, entropies, linewidth=0.8, color=color_entropy, alpha=0.9, label="Entropy")
+    ax1.set_xlabel("Generation Step", fontsize=12)
+    ax1.set_ylabel("Entropy (nats)", fontsize=12, color=color_entropy)
+    ax1.tick_params(axis="y", labelcolor=color_entropy)
+
+    # 右 Y 轴：Gate Sigmoid Mean
+    ax2 = ax1.twinx()
+    color_gate = "darkorange"
+    ax2.plot(steps, gate_values, linewidth=0.8, color=color_gate, alpha=0.7, label="Gate Sigmoid")
+    ax2.set_ylabel("Token Gate Sigmoid Mean", fontsize=12, color=color_gate)
+    ax2.tick_params(axis="y", labelcolor=color_gate)
 
     # 标注 #### 答案标记位置
     answer_marker = ANSWER_START
@@ -181,17 +210,20 @@ def run_entropy_test(
             answer_step = idx + 1  # 1-indexed
 
     if answer_step is not None:
-        ax.axvline(x=answer_step, color="red", linestyle="--", linewidth=1.0, alpha=0.7)
-        ax.text(
-            answer_step, ax.get_ylim()[1] * 0.95,
+        ax1.axvline(x=answer_step, color="red", linestyle="--", linewidth=1.0, alpha=0.7)
+        ax1.text(
+            answer_step, ax1.get_ylim()[1] * 0.95,
             f" {answer_marker}",
             color="red", fontsize=9, va="top",
         )
 
-    ax.set_xlabel("Generation Step", fontsize=12)
-    ax.set_ylabel("Entropy (nats)", fontsize=12)
-    ax.set_title("Token-level Entropy during Generation", fontsize=14)
-    ax.grid(True, alpha=0.3)
+    # 合并图例
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper right", fontsize=10)
+
+    ax1.set_title("Token-level Entropy & Gate Sigmoid during Generation", fontsize=14)
+    ax1.grid(True, alpha=0.3)
     fig.tight_layout()
 
     # 保存图片
@@ -214,7 +246,9 @@ def run_entropy_test(
         "num_steps": num_steps,
         "entropy_mean": float(ent_array.mean()),
         "entropy_std": float(ent_array.std()),
+        "gate_sigmoid_mean": float(gate_array.mean()),
         "entropies": [float(e) for e in entropies],
+        "gate_values": [float(g) for g in gate_values],
         "tokens": tokens_text,
     }
     json_path = os.path.join(save_dir, "entropy_data.json")
