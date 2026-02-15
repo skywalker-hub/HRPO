@@ -60,15 +60,26 @@ def run_entropy_test(
     model.load_adapter(adapter_path)
     model = FastLanguageModel.for_inference(model)
 
-    # ---- 1.5 提取 token_gate_matrix，预计算每个 token 的 sigmoid 均值 ----
+    # ---- 1.5 从 checkpoint 文件直接加载 token_gate_matrix ----
+    import os as _os
     gate_weight = None
-    for name, param in model.named_parameters():
-        if "token_gate_matrix" in name and "weight" in name:
-            gate_weight = param.data
-            print(f"找到 token_gate_matrix: {name}, shape={gate_weight.shape}")
+    for filename in ["adapter_model.safetensors", "adapter_model.bin"]:
+        filepath = _os.path.join(adapter_path, filename)
+        if _os.path.exists(filepath):
+            if filename.endswith(".safetensors"):
+                from safetensors.torch import load_file
+                state_dict = load_file(filepath)
+            else:
+                state_dict = torch.load(filepath, map_location="cpu")
+            for key, value in state_dict.items():
+                if "token_gate_matrix" in key and "weight" in key:
+                    gate_weight = value
+                    print(f"从 {filename} 加载 token_gate_matrix: {key}, shape={gate_weight.shape}")
+                    break
+            del state_dict
             break
     if gate_weight is None:
-        raise RuntimeError("未找到 token_gate_matrix 权重，请检查模型/adapter")
+        raise RuntimeError("未在 checkpoint 中找到 token_gate_matrix 权重")
     row_sigmoid_mean = torch.sigmoid(gate_weight).mean(dim=1)  # (vocab_size,)
 
     # ---- 2. 构造 Prompt ----
