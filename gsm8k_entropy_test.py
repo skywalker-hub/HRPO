@@ -13,7 +13,7 @@ from utils import *
 
 
 # ====== 在此处修改测试问题 ======
-QUESTION = "Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May?"
+QUESTION = "A robe takes 2 bolts of blue fiber and half that much white fiber.  How many bolts in total does it take?"
 # ================================
 
 
