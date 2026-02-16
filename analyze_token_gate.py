@@ -184,8 +184,26 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
     print(f"\n[6. Change statistics]")
     print(f"  Tokens with deviation > {threshold}: {changed_count} / {vocab_size} ({100*changed_count/vocab_size:.2f}%)")
     
-    # 9. 打印指定 token 的详细门控向量
-    print(f"\n[7. Detailed gate vectors for selected tokens (first 20 dims)]")
+    # 9. 输出变化最大的 token 的每个维度的数值和 sigmoid 值
+    most_changed_idx = delta_from_init.argmax().item()
+    try:
+        most_changed_token_str = tokenizer.decode([most_changed_idx]).replace('\n', '\\n')
+    except:
+        most_changed_token_str = "<UNK>"
+    most_changed_raw = gate_weight[most_changed_idx]
+    most_changed_sigmoid = torch.sigmoid(most_changed_raw)
+    print(f"\n[8. Most changed token - all dimensions]")
+    print(f"  Token: '{most_changed_token_str}' (id={most_changed_idx}), deviation={delta_from_init[most_changed_idx].item():.6f}")
+    print(f"  Total dims: {hidden_size}")
+    print(f"  {'Dim':>6} | {'Raw':>12} | {'Sigmoid':>12}")
+    print(f"  {'-'*36}")
+    for dim_idx in range(hidden_size):
+        raw_val = most_changed_raw[dim_idx].item()
+        sig_val = most_changed_sigmoid[dim_idx].item()
+        print(f"  {dim_idx:>6} | {raw_val:>12.6f} | {sig_val:>12.6f}")
+    
+    # 10. 打印指定 token 的详细门控向量
+    print(f"\n[9. Detailed gate vectors for selected tokens (first 20 dims)]")
     sample_tokens = ['0', '1', '2', '+', '-', '=', 'the', 'answer', '\n']
     for token_str in sample_tokens:
         tokens = tokenizer.encode(token_str, add_special_tokens=False)
