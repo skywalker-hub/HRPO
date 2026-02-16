@@ -99,7 +99,7 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
     
     # 4. 找出变化最大的 token
     print(f"\n[2. Top 20 most changed tokens] (largest deviation from init {init_value})")
-    top_changed = delta_from_init.topk(20)
+    top_changed = delta_from_init.topk(100)
     print(f"{'Token ID':>10} | {'Token':>20} | {'Deviation':>10} | {'Mean':>10} | {'SigmoidMean':>12}")
     print("-" * 70)
     for idx, delta in zip(top_changed.indices, top_changed.values):
