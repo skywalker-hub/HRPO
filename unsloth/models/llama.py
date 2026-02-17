@@ -932,7 +932,7 @@ def LlamaModel_fast_forward_inference(
     attention_mask = None,
     *args, **kwargs,
 ):
-    ######主断点10：核心第3层，HRPO调用处
+    ######主断点10：核心第3层
     input_ids = input_ids[:,:self.max_seq_length]
     bsz, q_len = input_ids.shape
     hd = self.config.hidden_size
