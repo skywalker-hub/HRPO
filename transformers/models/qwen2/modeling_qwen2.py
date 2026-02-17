@@ -613,6 +613,10 @@ class Qwen2Model(Qwen2PreTrainedModel):
 
         return discrete_thinking + continuous_thinking, a_t
 
+
+
+
+
     @add_start_docstrings_to_model_forward(QWEN2_INPUTS_DOCSTRING)
     def forward(
         self,
