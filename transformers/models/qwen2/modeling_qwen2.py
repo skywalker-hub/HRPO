@@ -561,8 +561,8 @@ class Qwen2Model(Qwen2PreTrainedModel):
             new_embeds: 混合后的嵌入向量
             a_t: 衰减系数
         """
-        r_t = torch.sigmoid(self.thinking_residual_gate_r(embeds))
-        i_t = torch.sigmoid(self.thinking_residual_gate_i(embeds))  # 保留 i_t 定义，但不再使用
+        r_t = torch.sigmoid(self.thinking_residual_gate_r(residual))
+        i_t = torch.sigmoid(self.thinking_residual_gate_i(residual))  # 保留 i_t 定义，但不再使用
         a_t = self.thinking_residual_Lambda(r_t)
         
         # ★ 关键修复：对 residual 做 RMSNorm 归一化后再送入 head
