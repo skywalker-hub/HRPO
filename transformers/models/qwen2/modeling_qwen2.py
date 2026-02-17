@@ -544,8 +544,9 @@ class Qwen2Model(Qwen2PreTrainedModel):
 
 
 
-    #####HRPO主断点：HRPO核心计算函数定义处
-    #####embeds:最后一个词嵌入向量，residual此时为上一步的隐藏状态
+    #####HRPO主断点：HRPO核心模块，HRPO核心计算函数定义处
+    #####embeds:最后一个词嵌入向量，residual此时为上一步的原始隐藏状态
+    #####此处可更改连续思考的混合方法
     def thinking_residual(self, embeds, residual, input_ids=None, eps=1e-8):
         """
         混合推理残差计算函数
