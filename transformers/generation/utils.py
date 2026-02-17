@@ -3387,6 +3387,7 @@ class GenerationMixin:
 
             #####主断点：使用主断点8处传回的原始隐状态，论文公式（3）中的h_t+1在此处计算
             #####此处最后得到的last_thinking_states就是论文中的h_t+1
+            ##########在此处可更改连续思维h的计算方式
             if outputs.hidden_states is not None and len(outputs.hidden_states) > 3:
                 hs = outputs.hidden_states[3]  # 原始隐状态 X
                 # prefill 阶段返回的是标准 hidden_states 元组，形状为 [batch, seq_len, hidden]
