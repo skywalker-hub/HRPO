@@ -943,12 +943,12 @@ def LlamaModel_fast_forward_inference(
 
     is_thinking = kwargs.get('is_thinking')
 
-    #####last_thinking_states在此时被接收和处理
+    #####last_thinking_states（上一时刻的隐状态）在此时被接收和处理
     last_thinking_states = kwargs.get('last_thinking_states')
     if is_thinking is not None and last_thinking_states is not None:
         thinking_embeds = last_thinking_states
 
-        ##############主断点11：HRPO调用处
+        ##############主断点11：HRPO实际调用处
         # 传入 input_ids 用于查询 token 门控矩阵
         X_hat, a_t = self.model.thinking_residual(
             X, last_thinking_states.unsqueeze(1),

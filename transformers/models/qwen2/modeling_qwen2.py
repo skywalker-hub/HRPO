@@ -542,7 +542,9 @@ class Qwen2Model(Qwen2PreTrainedModel):
     def set_input_embeddings(self, value):
         self.embed_tokens = value
 
-    #####主断点：HRPO核心计算函数
+
+
+    #####HRPO主断点：HRPO核心计算函数定义处
     #####embeds:最后一个词嵌入向量，residual此时为上一步的隐藏状态
     def thinking_residual(self, embeds, residual, input_ids=None, eps=1e-8):
         """
