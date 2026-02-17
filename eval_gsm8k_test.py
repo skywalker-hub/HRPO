@@ -164,7 +164,7 @@ def evaluate_model(
         prompt_length = prompt_ids.size(1)
 
         # Generate responses
-        #####主断点1:
+        #####主断点1:在这里打断点
         outputs = model.generate(
             prompt_ids, attention_mask=prompt_mask, 
             generation_config=GenerationConfig(
