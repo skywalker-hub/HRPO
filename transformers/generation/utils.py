@@ -3322,7 +3322,7 @@ class GenerationMixin:
 
             #####之后迭代
             else:
-                #####主断点8:
+                ###################主断点8:进入核心前向，llama.py  ##############
                 #####模型前向第2层的入口：last_thinking_states此时被传入
                 outputs = model_forward(**model_inputs, return_dict=True)
 
@@ -3383,7 +3383,10 @@ class GenerationMixin:
             strs = processing_class.batch_decode(input_ids[:, input_len:])
             is_thinking = [self.answer_start not in s for s in strs]
             
-            # 直接使用原始隐状态，thinking_residual_head 会在 thinking_residual() 函数内被调用
+
+
+            #####主断点：使用主断点8处传回的原始隐状态，论文公式（3）中的h_t+1在此处计算
+            #####此处最后得到的last_thinking_states就是论文中的h_t+1
             if outputs.hidden_states is not None and len(outputs.hidden_states) > 3:
                 hs = outputs.hidden_states[3]  # 原始隐状态 X
                 # prefill 阶段返回的是标准 hidden_states 元组，形状为 [batch, seq_len, hidden]
@@ -3398,6 +3401,8 @@ class GenerationMixin:
                     'bv,vd->bd', probs, self.get_input_embeddings().weight
                 )
                 last_thinking_states /= torch.sqrt((probs ** 2).sum(-1, keepdim=True)).to(last_thinking_states.dtype)
+
+
 
             if return_thinking_embeds and outputs.hidden_states is not None:
                 thinking_embeds.append(outputs.hidden_states[0].unsqueeze(1))

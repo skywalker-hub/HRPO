@@ -949,6 +949,7 @@ def LlamaModel_fast_forward_inference(
         thinking_embeds = last_thinking_states
 
         ##############主断点11：HRPO实际调用处
+        ##############上一时刻的隐状态，上一时刻的embedd在这里送往HRPO进行计算得出混合向量，再送入attention计算
         # 传入 input_ids 用于查询 token 门控矩阵
         X_hat, a_t = self.model.thinking_residual(
             X, last_thinking_states.unsqueeze(1),
@@ -985,6 +986,7 @@ def LlamaModel_fast_forward_inference(
 
     next_decoder_cache = []
 
+    ########断点：Transformer decoder 的核心循环
     for idx, decoder_layer in enumerate(self.model.layers):
         residual.copy_(X) # residual = X
         X = fast_rms_layernorm_inference(
@@ -1024,6 +1026,7 @@ def LlamaModel_fast_forward_inference(
     pass
 
     ##############主断点12：前向循环完成处
+    ##############X 是经过了全部 N 层 decoder layer 处理后的隐藏状态，形状为 [bsz, 1, hidden_dim]
     X = fast_rms_layernorm_inference(
         self.model.norm,
         X,
@@ -1032,11 +1035,11 @@ def LlamaModel_fast_forward_inference(
         variance = variance,
     )
 
-    ##############主断点13：返回主断点9，返回
+    ##############主断点13：返回主断点9
     return BaseModelOutputWithPast(
-        last_hidden_state = X,
+        last_hidden_state = X,  #####返回计算出来的隐状态h
         past_key_values = next_decoder_cache,
-        # 新增: 在 hidden_states 中包含原始隐状态 X，用于计算 last_thinking_states
+        # 新增: 在 hidden_states中，在数组下标3处传回原始隐状态X，用于后续计算 last_thinking_states
         hidden_states = [] if is_thinking is None else [thinking_embeds, is_thinking, embeds_ratio, X.squeeze(1)],
         attentions = [],
     )
@@ -1063,7 +1066,7 @@ def CausalLM_fast_forward(fast_forward_inference):
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         if past_key_values is not None:
 
-            #############主断点9：前向第3层入口
+            #############主断点9：前向核心第2层，第3层入口
             #####output
             outputs = fast_forward_inference(
                 self,
@@ -1100,10 +1103,10 @@ def CausalLM_fast_forward(fast_forward_inference):
             )
         pass
 
-        #####最后隐藏向量
+        #####拿出最后隐藏向量，这之后一直去计算logits
         hidden_states = outputs[0]
 
-        bsz, q_len, hd = hidden_states.shape
+        bsz, q_len, hd = hidden_states.shape ###bsz含义：批次中有几个样本
         lm_head = self.lm_head.weight
         lm_head_device = lm_head.device
 
@@ -1129,6 +1132,7 @@ def CausalLM_fast_forward(fast_forward_inference):
             )
         pass
 
+        ############断点：在此处计算logits
         if bsz == 1 and q_len == 1:
             logits = torch.mv(lm_head, hidden_states.ravel().to(dtype))
             logits = logits.unsqueeze(0).unsqueeze(0)
@@ -1224,7 +1228,7 @@ def CausalLM_fast_forward(fast_forward_inference):
             loss = loss,
             logits = logits,
             past_key_values = outputs.past_key_values,
-            hidden_states = outputs.hidden_states,
+            hidden_states = outputs.hidden_states,####此处传回的就是当前步的隐状态h
             attentions=  outputs.attentions,
         )
     pass
