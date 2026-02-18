@@ -219,6 +219,21 @@ def run_entropy_test(
         print(f"{rank + 1:>4}  {idx + 1:>5}  {entropies[idx]:>10.4f}  {gate_values[idx]:>10.6f}  {ratio_str}  {token_repr}")
     print("-" * 95)
 
+    # 打印 Embed Ratio 最低的 Top-20 步骤
+    if has_embeds_ratio:
+        valid_mask = ~np.isnan(ratio_array)
+        if valid_mask.sum() > 0:
+            low_k = min(20, int(valid_mask.sum()))
+            sorted_ratio_indices = np.argsort(np.where(valid_mask, ratio_array, np.inf))[:low_k]
+            print(f"\nEmbed Ratio 最低的 Top-{low_k} 步骤:")
+            print("-" * 95)
+            print(f"{'Rank':>4}  {'Step':>5}  {'EmbedRatio':>11}  {'Entropy':>10}  {'GateSigm':>10}  Token")
+            print("-" * 95)
+            for rank, idx in enumerate(sorted_ratio_indices):
+                token_repr = repr(tokens_text[idx])
+                print(f"{rank + 1:>4}  {idx + 1:>5}  {embed_ratio_values[idx]:>11.6f}  {entropies[idx]:>10.4f}  {gate_values[idx]:>10.6f}  {token_repr}")
+            print("-" * 95)
+
     # ---- 6. 绘制折线图（双 Y 轴：Entropy + Gate Sigmoid + Embed Ratio）----
     fig, ax1 = plt.subplots(figsize=(14, 5))
     steps = np.arange(1, num_steps + 1)
