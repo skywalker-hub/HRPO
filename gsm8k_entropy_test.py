@@ -6,6 +6,7 @@ import json
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy import stats
 from datetime import datetime
 from transformers import GenerationConfig
 
@@ -290,6 +291,115 @@ def run_entropy_test(
     print(f"\n折线图已保存至: {plot_path}")
     plt.close(fig)
 
+    # ---- 6.5 Embed Ratio 与 Entropy 关联性分析 ----
+    if has_embeds_ratio:
+        valid_mask = ~np.isnan(ratio_array)
+        r_valid = ratio_array[valid_mask]
+        e_valid = ent_array[valid_mask]
+
+        if len(r_valid) >= 5:
+            # --- (a) 相关系数 ---
+            pearson_r, pearson_p = stats.pearsonr(r_valid, e_valid)
+            spearman_r, spearman_p = stats.spearmanr(r_valid, e_valid)
+
+            print("\n" + "=" * 60)
+            print("【Embed Ratio ↔ Entropy 关联性分析】")
+            print("=" * 60)
+            print(f"  Pearson  r = {pearson_r:+.4f}  (p = {pearson_p:.2e})")
+            print(f"  Spearman ρ = {spearman_r:+.4f}  (p = {spearman_p:.2e})")
+            if abs(pearson_r) < 0.2:
+                strength = "极弱/无"
+            elif abs(pearson_r) < 0.4:
+                strength = "弱"
+            elif abs(pearson_r) < 0.6:
+                strength = "中等"
+            elif abs(pearson_r) < 0.8:
+                strength = "强"
+            else:
+                strength = "极强"
+            direction = "负" if pearson_r < 0 else "正"
+            print(f"  → {strength}{direction}相关")
+
+            # --- (b) Top-N 重叠分析 ---
+            overlap_k = min(20, len(r_valid))
+            top_entropy_set = set(np.argsort(ent_array)[::-1][:overlap_k])
+            low_ratio_set = set(np.argsort(np.where(valid_mask, ratio_array, np.inf))[:overlap_k])
+            overlap = top_entropy_set & low_ratio_set
+            print(f"\n  Top-{overlap_k} 重叠分析:")
+            print(f"    熵最高 {overlap_k} 步 ∩ Ratio最低 {overlap_k} 步 = {len(overlap)} 步重叠")
+            print(f"    重叠率: {len(overlap)/overlap_k*100:.1f}%")
+            if overlap:
+                overlap_sorted = sorted(overlap, key=lambda i: ratio_array[i])
+                print(f"    重叠步骤 (按 Ratio 升序):")
+                for idx in overlap_sorted:
+                    print(f"      Step {idx+1:>4}: Ratio={embed_ratio_values[idx]:.6f}, Entropy={entropies[idx]:.4f}, Token={repr(tokens_text[idx])}")
+
+            # --- (c) 分箱统计 ---
+            n_bins = 5
+            bin_edges = np.linspace(r_valid.min(), r_valid.max() + 1e-9, n_bins + 1)
+            print(f"\n  分箱统计 ({n_bins} 等宽区间):")
+            print(f"  {'Ratio 区间':>25}  {'样本数':>6}  {'平均Entropy':>12}  {'Entropy标准差':>13}")
+            print("  " + "-" * 62)
+            bin_mean_entropy = []
+            bin_centers = []
+            for b in range(n_bins):
+                mask_bin = (r_valid >= bin_edges[b]) & (r_valid < bin_edges[b + 1])
+                cnt = mask_bin.sum()
+                if cnt > 0:
+                    mean_e = e_valid[mask_bin].mean()
+                    std_e = e_valid[mask_bin].std()
+                    bin_mean_entropy.append(mean_e)
+                    bin_centers.append((bin_edges[b] + bin_edges[b + 1]) / 2)
+                else:
+                    mean_e = std_e = float("nan")
+                label = f"[{bin_edges[b]:.4f}, {bin_edges[b+1]:.4f})"
+                print(f"  {label:>25}  {cnt:>6}  {mean_e:>12.4f}  {std_e:>13.4f}")
+
+            # --- (d) 绘制关联性图 (2x1 子图) ---
+            fig_corr, (ax_scatter, ax_bin) = plt.subplots(1, 2, figsize=(14, 5))
+
+            # 左图：散点图 + 回归线
+            ax_scatter.scatter(r_valid, e_valid, s=10, alpha=0.5, color="steelblue", edgecolors="none")
+            slope, intercept = np.polyfit(r_valid, e_valid, 1)
+            x_fit = np.linspace(r_valid.min(), r_valid.max(), 100)
+            ax_scatter.plot(x_fit, slope * x_fit + intercept, color="red", linewidth=1.5,
+                            label=f"y={slope:.2f}x+{intercept:.2f}")
+            ax_scatter.set_xlabel("Embed Ratio", fontsize=12)
+            ax_scatter.set_ylabel("Entropy (nats)", fontsize=12)
+            ax_scatter.set_title(f"Scatter: Pearson r={pearson_r:+.3f}, Spearman ρ={spearman_r:+.3f}", fontsize=11)
+            ax_scatter.legend(fontsize=10)
+            ax_scatter.grid(True, alpha=0.3)
+
+            # 右图：分箱柱状图
+            if bin_centers:
+                bar_width = (bin_edges[1] - bin_edges[0]) * 0.7
+                ax_bin.bar(bin_centers, bin_mean_entropy, width=bar_width,
+                           color="steelblue", alpha=0.7, edgecolor="white")
+                ax_bin.set_xlabel("Embed Ratio (bin center)", fontsize=12)
+                ax_bin.set_ylabel("Mean Entropy (nats)", fontsize=12)
+                ax_bin.set_title("Binned: Mean Entropy per Embed Ratio Range", fontsize=11)
+                ax_bin.grid(True, alpha=0.3, axis="y")
+
+            fig_corr.tight_layout()
+            corr_path = os.path.join(save_dir, "embed_ratio_entropy_correlation.png")
+            fig_corr.savefig(corr_path, dpi=150)
+            print(f"\n关联性分析图已保存至: {corr_path}")
+            plt.close(fig_corr)
+
+            correlation_stats = {
+                "pearson_r": float(pearson_r),
+                "pearson_p": float(pearson_p),
+                "spearman_r": float(spearman_r),
+                "spearman_p": float(spearman_p),
+                "top_overlap_k": overlap_k,
+                "top_overlap_count": len(overlap),
+                "top_overlap_steps": sorted([int(i + 1) for i in overlap]),
+            }
+        else:
+            correlation_stats = None
+    else:
+        correlation_stats = None
+
     # ---- 7. 保存熵数据为 JSON ----
     entropy_data = {
         "question": question,
@@ -305,6 +415,7 @@ def run_entropy_test(
         "entropies": [float(e) for e in entropies],
         "gate_values": [float(g) for g in gate_values],
         "embed_ratio_values": [float(r) if not np.isnan(r) else None for r in embed_ratio_values],
+        "correlation_stats": correlation_stats,
         "tokens": tokens_text,
     }
     json_path = os.path.join(save_dir, "entropy_data.json")
