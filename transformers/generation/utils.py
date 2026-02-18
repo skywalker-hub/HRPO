@@ -3389,20 +3389,27 @@ class GenerationMixin:
             #####主断点：使用主断点8处传回的原始隐状态，论文公式（3）中的h_t+1在此处计算
             #####此处最后得到的last_thinking_states就是论文中的h_t+1
             ##########在此处可更改连续思维h的计算方式
-            if outputs.hidden_states is not None and len(outputs.hidden_states) > 3:
-                hs = outputs.hidden_states[3]  # 原始隐状态 X
-                # prefill 阶段返回的是标准 hidden_states 元组，形状为 [batch, seq_len, hidden]
-                # 推理阶段返回的是自定义列表，形状为 [batch, hidden]
-                if hs.dim() == 3:  # prefill 阶段
-                    last_thinking_states = hs[:, -1, :]  # 只取最后一个 token
-                else:  # 推理阶段
-                    last_thinking_states = hs
-            else:################### HRPO的隐藏状态计算
-                # Fallback
-                last_thinking_states = torch.einsum(
-                    'bv,vd->bd', probs, self.get_input_embeddings().weight
-                )
-                last_thinking_states /= torch.sqrt((probs ** 2).sum(-1, keepdim=True)).to(last_thinking_states.dtype)
+            # [已注释] 使用模型输出的原始隐藏状态作为 last_thinking_states
+            # if outputs.hidden_states is not None and len(outputs.hidden_states) > 3:
+            #     hs = outputs.hidden_states[3]  # 原始隐状态 X
+            #     # prefill 阶段返回的是标准 hidden_states 元组，形状为 [batch, seq_len, hidden]
+            #     # 推理阶段返回的是自定义列表，形状为 [batch, hidden]
+            #     if hs.dim() == 3:  # prefill 阶段
+            #         last_thinking_states = hs[:, -1, :]  # 只取最后一个 token
+            #     else:  # 推理阶段
+            #         last_thinking_states = hs
+            # else:################### HRPO的隐藏状态计算
+            #     # Fallback
+            #     last_thinking_states = torch.einsum(
+            #         'bv,vd->bd', probs, self.get_input_embeddings().weight
+            #     )
+            #     last_thinking_states /= torch.sqrt((probs ** 2).sum(-1, keepdim=True)).to(last_thinking_states.dtype)
+
+            # [当前] 使用 probs + embedding 加权方式计算 last_thinking_states
+            last_thinking_states = torch.einsum(
+                'bv,vd->bd', probs, self.get_input_embeddings().weight
+            )
+            last_thinking_states /= torch.sqrt((probs ** 2).sum(-1, keepdim=True)).to(last_thinking_states.dtype)
 
 
 

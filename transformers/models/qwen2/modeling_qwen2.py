@@ -562,43 +562,50 @@ class Qwen2Model(Qwen2PreTrainedModel):
             a_t: 衰减系数
         """
         r_t = torch.sigmoid(self.thinking_residual_gate_r(residual))
-        i_t = torch.sigmoid(self.thinking_residual_gate_i(residual))  # 保留 i_t 定义，但不再使用
         a_t = self.thinking_residual_Lambda(r_t)
-        
-        # ★ 关键修复：对 residual 做 RMSNorm 归一化后再送入 head
-        # 原因：residual 是 Transformer 隐藏状态，范数可达数百~数千，
-        # 导致 ∂L/∂W = grad^T × residual 中梯度被 ||residual|| 放大。
-        # 归一化后 ||residual_normed|| ≈ 1，梯度范数仅取决于 upstream grad。
-        residual_variance = residual.to(torch.float32).pow(2).mean(-1, keepdim=True)
-        residual_normed = residual * torch.rsqrt(residual_variance + eps)
-        h_residual = self.thinking_residual_head(residual_normed.to(residual.dtype))  # 连续信息向量
 
+        # [当前] i_t 基于 embeds 计算，continuous_thinking = sqrt(1 - a_t^2) * (i_t * residual)
+        i_t = torch.sigmoid(self.thinking_residual_gate_i(embeds))
 
-        # 新增：基于 token ID 的离散门控
-        # g_k = sigmoid(lookup(k))，形状 (batch, seq_len, hidden_size)
-        if input_ids is not None:
-            # Debug: record if input_ids is passed (print once in training mode)
-            if self.training and not hasattr(self, '_gate_debug_printed'):
-                print(f"\n[DEBUG] token_gate_matrix called!")
-                print(f"  input_ids shape: {input_ids.shape}")
-                print(f"  input_ids sample: {input_ids.flatten()[:10].tolist()}")
-                self._gate_debug_printed = True
-            
-            gate_logits = self.token_gate_matrix(input_ids)  # (batch, seq_len, hidden_size)
-            g_k = torch.sigmoid(gate_logits)
-        else:
-            # Debug: if input_ids is None
-            if self.training and not hasattr(self, '_gate_none_debug_printed'):
-                print(f"\n[WARNING] token_gate_matrix NOT called! input_ids is None")
-                self._gate_none_debug_printed = True
-            # 如果没有提供 input_ids，回退到全 1 门控（相当于不过滤）
-            g_k = torch.ones_like(h_residual)
-        
-        # continuous_bias = h_residual * g_k，替代原来的 i_t * h_residual
-        continuous_bias = h_residual * g_k
-        
         discrete_thinking = a_t * embeds
-        continuous_thinking = torch.sqrt(1 - a_t.pow(2) + eps) * continuous_bias
+        continuous_thinking = torch.sqrt(1 - a_t.pow(2) + eps) * (i_t * residual)
+
+        # [已注释] 旧版：i_t 基于 residual，使用 RMSNorm + head + token_gate 计算 continuous_bias
+        # i_t = torch.sigmoid(self.thinking_residual_gate_i(residual))  # 保留 i_t 定义，但不再使用
+        # 
+        # # ★ 关键修复：对 residual 做 RMSNorm 归一化后再送入 head
+        # # 原因：residual 是 Transformer 隐藏状态，范数可达数百~数千，
+        # # 导致 ∂L/∂W = grad^T × residual 中梯度被 ||residual|| 放大。
+        # # 归一化后 ||residual_normed|| ≈ 1，梯度范数仅取决于 upstream grad。
+        # residual_variance = residual.to(torch.float32).pow(2).mean(-1, keepdim=True)
+        # residual_normed = residual * torch.rsqrt(residual_variance + eps)
+        # h_residual = self.thinking_residual_head(residual_normed.to(residual.dtype))  # 连续信息向量
+        #
+        # # 新增：基于 token ID 的离散门控
+        # # g_k = sigmoid(lookup(k))，形状 (batch, seq_len, hidden_size)
+        # if input_ids is not None:
+        #     # Debug: record if input_ids is passed (print once in training mode)
+        #     if self.training and not hasattr(self, '_gate_debug_printed'):
+        #         print(f"\n[DEBUG] token_gate_matrix called!")
+        #         print(f"  input_ids shape: {input_ids.shape}")
+        #         print(f"  input_ids sample: {input_ids.flatten()[:10].tolist()}")
+        #         self._gate_debug_printed = True
+        #     
+        #     gate_logits = self.token_gate_matrix(input_ids)  # (batch, seq_len, hidden_size)
+        #     g_k = torch.sigmoid(gate_logits)
+        # else:
+        #     # Debug: if input_ids is None
+        #     if self.training and not hasattr(self, '_gate_none_debug_printed'):
+        #         print(f"\n[WARNING] token_gate_matrix NOT called! input_ids is None")
+        #         self._gate_none_debug_printed = True
+        #     # 如果没有提供 input_ids，回退到全 1 门控（相当于不过滤）
+        #     g_k = torch.ones_like(h_residual)
+        # 
+        # # continuous_bias = h_residual * g_k，替代原来的 i_t * h_residual
+        # continuous_bias = h_residual * g_k
+        # 
+        # discrete_thinking = a_t * embeds
+        # continuous_thinking = torch.sqrt(1 - a_t.pow(2) + eps) * continuous_bias
 
         # 监控：计算离散/连续思维的模值比例（detach 避免影响梯度）
         if self.training:
