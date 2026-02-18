@@ -120,6 +120,7 @@ def run_entropy_test(
             ),
             processing_class=tokenizer,
             is_inference=is_inference,
+            return_thinking_embeds=True,
         )
 
     # ---- 4. 解码文本 ----
@@ -149,6 +150,13 @@ def run_entropy_test(
     entropies = []
     gate_values = []
     tokens_text = []
+    embed_ratio_values = []
+
+    # embeds_ratio shape: (batch, prompt_length + num_steps)，取生成部分
+    has_embeds_ratio = hasattr(outputs, "embeds_ratio") and outputs.embeds_ratio is not None
+    if has_embeds_ratio:
+        gen_embeds_ratio = outputs.embeds_ratio[0, prompt_length:].cpu()
+        print(f"已获取 embeds_ratio，生成部分长度: {gen_embeds_ratio.shape[0]}")
 
     for step_idx in range(num_steps):
         logits = scores[step_idx] / temperature  # 应用 temperature
@@ -160,19 +168,26 @@ def run_entropy_test(
         tokens_text.append(token_str)
         gate_values.append(row_sigmoid_mean[token_id].item())
 
-    # 打印所有步骤的熵和门控值
+        if has_embeds_ratio and step_idx < gen_embeds_ratio.shape[0]:
+            embed_ratio_values.append(gen_embeds_ratio[step_idx].item())
+        else:
+            embed_ratio_values.append(float("nan"))
+
+    # 打印所有步骤的熵、门控值和 embeds_ratio
     print(f"\n共生成 {num_steps} 个 token")
-    print("-" * 80)
-    print(f"{'Step':>5}  {'Entropy':>10}  {'GateSigm':>10}  Token")
-    print("-" * 80)
+    print("-" * 95)
+    print(f"{'Step':>5}  {'Entropy':>10}  {'GateSigm':>10}  {'EmbedRatio':>11}  Token")
+    print("-" * 95)
     for step_idx in range(num_steps):
         token_repr = repr(tokens_text[step_idx])
-        print(f"{step_idx + 1:>5}  {entropies[step_idx]:>10.4f}  {gate_values[step_idx]:>10.6f}  {token_repr}")
-    print("-" * 80)
+        ratio_str = f"{embed_ratio_values[step_idx]:>11.6f}" if not np.isnan(embed_ratio_values[step_idx]) else f"{'N/A':>11}"
+        print(f"{step_idx + 1:>5}  {entropies[step_idx]:>10.4f}  {gate_values[step_idx]:>10.6f}  {ratio_str}  {token_repr}")
+    print("-" * 95)
 
     # 统计摘要
     ent_array = np.array(entropies)
     gate_array = np.array(gate_values)
+    ratio_array = np.array(embed_ratio_values)
     print(f"\n信息熵统计:")
     print(f"  平均值: {ent_array.mean():.4f}")
     print(f"  标准差: {ent_array.std():.4f}")
@@ -182,20 +197,29 @@ def run_entropy_test(
     print(f"  平均值: {gate_array.mean():.6f}")
     print(f"  最小值: {gate_array.min():.6f} (step {gate_array.argmin() + 1})")
     print(f"  最大值: {gate_array.max():.6f} (step {gate_array.argmax() + 1})")
+    if has_embeds_ratio:
+        valid_ratio = ratio_array[~np.isnan(ratio_array)]
+        if len(valid_ratio) > 0:
+            print(f"\nEmbeds Ratio 统计:")
+            print(f"  平均值: {valid_ratio.mean():.6f}")
+            print(f"  标准差: {valid_ratio.std():.6f}")
+            print(f"  最小值: {valid_ratio.min():.6f} (step {np.nanargmin(ratio_array) + 1})")
+            print(f"  最大值: {valid_ratio.max():.6f} (step {np.nanargmax(ratio_array) + 1})")
 
     # 打印熵最高的 Top-20 步骤
     top_k = min(20, num_steps)
     top_indices = np.argsort(ent_array)[::-1][:top_k]
     print(f"\n熵最高的 Top-{top_k} 步骤:")
-    print("-" * 80)
-    print(f"{'Rank':>4}  {'Step':>5}  {'Entropy':>10}  {'GateSigm':>10}  Token")
-    print("-" * 80)
+    print("-" * 95)
+    print(f"{'Rank':>4}  {'Step':>5}  {'Entropy':>10}  {'GateSigm':>10}  {'EmbedRatio':>11}  Token")
+    print("-" * 95)
     for rank, idx in enumerate(top_indices):
         token_repr = repr(tokens_text[idx])
-        print(f"{rank + 1:>4}  {idx + 1:>5}  {entropies[idx]:>10.4f}  {gate_values[idx]:>10.6f}  {token_repr}")
-    print("-" * 80)
+        ratio_str = f"{embed_ratio_values[idx]:>11.6f}" if not np.isnan(embed_ratio_values[idx]) else f"{'N/A':>11}"
+        print(f"{rank + 1:>4}  {idx + 1:>5}  {entropies[idx]:>10.4f}  {gate_values[idx]:>10.6f}  {ratio_str}  {token_repr}")
+    print("-" * 95)
 
-    # ---- 6. 绘制折线图（双 Y 轴：Entropy + Gate Sigmoid）----
+    # ---- 6. 绘制折线图（双 Y 轴：Entropy + Gate Sigmoid + Embed Ratio）----
     fig, ax1 = plt.subplots(figsize=(14, 5))
     steps = np.arange(1, num_steps + 1)
 
@@ -206,11 +230,14 @@ def run_entropy_test(
     ax1.set_ylabel("Entropy (nats)", fontsize=12, color=color_entropy)
     ax1.tick_params(axis="y", labelcolor=color_entropy)
 
-    # 右 Y 轴：Gate Sigmoid Mean
+    # 右 Y 轴：Gate Sigmoid Mean + Embed Ratio（共享 0~1 范围）
     ax2 = ax1.twinx()
     color_gate = "darkorange"
     ax2.plot(steps, gate_values, linewidth=0.8, color=color_gate, alpha=0.7, label="Gate Sigmoid")
-    ax2.set_ylabel("Token Gate Sigmoid Mean", fontsize=12, color=color_gate)
+    if has_embeds_ratio:
+        color_ratio = "forestgreen"
+        ax2.plot(steps, embed_ratio_values, linewidth=0.8, color=color_ratio, alpha=0.7, label="Embed Ratio")
+    ax2.set_ylabel("Gate Sigmoid / Embed Ratio", fontsize=12, color=color_gate)
     ax2.tick_params(axis="y", labelcolor=color_gate)
 
     # 标注 #### 答案标记位置
@@ -235,7 +262,7 @@ def run_entropy_test(
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper right", fontsize=10)
 
-    ax1.set_title("Token-level Entropy & Gate Sigmoid during Generation", fontsize=14)
+    ax1.set_title("Token-level Entropy, Gate Sigmoid & Embed Ratio during Generation", fontsize=14)
     ax1.grid(True, alpha=0.3)
     fig.tight_layout()
 
@@ -262,6 +289,7 @@ def run_entropy_test(
         "gate_sigmoid_mean": float(gate_array.mean()),
         "entropies": [float(e) for e in entropies],
         "gate_values": [float(g) for g in gate_values],
+        "embed_ratio_values": [float(r) if not np.isnan(r) else None for r in embed_ratio_values],
         "tokens": tokens_text,
     }
     json_path = os.path.join(save_dir, "entropy_data.json")

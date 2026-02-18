@@ -3441,7 +3441,7 @@ class GenerationMixin:
                     past_key_values=model_kwargs.get("past_key_values"),
                 )
             else:
-                return GenerateDecoderOnlyOutput(
+                result = GenerateDecoderOnlyOutput(
                     sequences=input_ids,
                     scores=scores,
                     logits=raw_logits,
@@ -3449,6 +3449,9 @@ class GenerationMixin:
                     hidden_states=decoder_hidden_states,
                     past_key_values=model_kwargs.get("past_key_values"),
                 )
+                if return_thinking_embeds and embeds_ratio:
+                    result.embeds_ratio = torch.cat(embeds_ratio, dim=1)
+                return result
         else:
             if return_thinking_embeds:
                 thinking_embeds.append(self.get_input_embeddings()(input_ids[:, -1:]))
