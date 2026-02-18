@@ -14,7 +14,7 @@ from utils import *
 
 
 # ====== 在此处修改测试问题 ======
-QUESTION = "A robe takes 2 bolts of blue fiber and half that much white fiber.  How many bolts in total does it take?"
+QUESTION = "Kylar went to the store to buy glasses for his new apartment. One glass costs $5, but every second glass costs only 60% of the price. Kylar wants to buy 16 glasses. How much does he need to pay for them?"
 # ================================
 
 
