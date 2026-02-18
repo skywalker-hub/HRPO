@@ -958,6 +958,8 @@ def LlamaModel_fast_forward_inference(
 
         embeds_ratio = a_t.mean(-1).view(-1)  # 用 view(-1) 替代 squeeze()，避免 bsz=1 时变成 0 维标量
         embeds_ratio[~torch.tensor(is_thinking)] = 1.
+        a_t_vector = a_t.squeeze(1)  # (batch, hidden_size) — 保留逐维度的完整向量
+        a_t_vector[~torch.tensor(is_thinking)] = 1.0
         X[is_thinking] = X_hat[is_thinking].to(X.dtype)
 
 
@@ -1040,7 +1042,7 @@ def LlamaModel_fast_forward_inference(
         last_hidden_state = X,  #####返回计算出来的隐状态h
         past_key_values = next_decoder_cache,
         # 新增: 在 hidden_states中，在数组下标3处传回原始隐状态X，用于后续计算 last_thinking_states
-        hidden_states = [] if is_thinking is None else [thinking_embeds, is_thinking, embeds_ratio, X.squeeze(1)],
+        hidden_states = [] if is_thinking is None else [thinking_embeds, is_thinking, embeds_ratio, X.squeeze(1), a_t_vector],
         attentions = [],
     )
 pass

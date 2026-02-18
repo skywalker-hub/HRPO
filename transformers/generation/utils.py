@@ -3294,6 +3294,7 @@ class GenerationMixin:
         embeds_ratio = [
             torch.ones_like(input_ids, dtype=torch.float32, device=input_ids.device)
         ] if return_thinking_embeds else []
+        a_t_vectors = [] if return_thinking_embeds else None
 
 
         #####主断点6:前向最外层循环：第1层
@@ -3405,7 +3406,7 @@ class GenerationMixin:
 
 
 
-            if return_thinking_embeds and outputs.hidden_states is not None:
+            if return_thinking_embeds and outputs.hidden_states is not None and len(outputs.hidden_states) > 2:
                 thinking_embeds.append(outputs.hidden_states[0].unsqueeze(1))
                 thinking_mask.append(
                     torch.tensor(outputs.hidden_states[1], device=input_ids.device).unsqueeze(1)
@@ -3413,6 +3414,8 @@ class GenerationMixin:
                 embeds_ratio.append(
                     torch.tensor(outputs.hidden_states[2], device=input_ids.device).unsqueeze(1)
                 )
+                if len(outputs.hidden_states) > 4 and outputs.hidden_states[4] is not None:
+                    a_t_vectors.append(outputs.hidden_states[4].unsqueeze(1))
 
             unfinished_sequences = unfinished_sequences & ~stopping_criteria(input_ids, scores)
             this_peer_finished = unfinished_sequences.max() == 0
@@ -3451,6 +3454,8 @@ class GenerationMixin:
                 )
                 if return_thinking_embeds and embeds_ratio:
                     result.embeds_ratio = torch.cat(embeds_ratio, dim=1)
+                if return_thinking_embeds and a_t_vectors:
+                    result.a_t_vectors = torch.cat(a_t_vectors, dim=1)
                 return result
         else:
             if return_thinking_embeds:

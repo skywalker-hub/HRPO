@@ -151,13 +151,21 @@ def run_entropy_test(
     entropies = []
     gate_values = []
     tokens_text = []
-    embed_ratio_values = []
+    # hidden_ratio 向量统计 (per-step, per-dimension)
+    hr_mean_values = []   # 每步 hidden_ratio 向量的均值
+    hr_std_values = []    # 每步 hidden_ratio 向量的标准差
+    hr_min_values = []    # 每步 hidden_ratio 向量的最小值
+    hr_max_values = []    # 每步 hidden_ratio 向量的最大值
 
-    # embeds_ratio shape: (batch, prompt_length + num_steps)，取生成部分
-    has_embeds_ratio = hasattr(outputs, "embeds_ratio") and outputs.embeds_ratio is not None
-    if has_embeds_ratio:
-        gen_embeds_ratio = outputs.embeds_ratio[0, prompt_length:].cpu()
-        print(f"已获取 embeds_ratio，生成部分长度: {gen_embeds_ratio.shape[0]}")
+    # a_t_vectors shape: (batch, num_gen_steps, hidden_size) — 不含 prefill 首步
+    # hidden_ratio = sqrt(1 - a_t²) 逐维度计算
+    has_a_t = hasattr(outputs, "a_t_vectors") and outputs.a_t_vectors is not None
+    if has_a_t:
+        a_t_gen = outputs.a_t_vectors[0].cpu().float()  # (num_gen_steps, hidden_size)
+        hr_vectors = torch.sqrt(1 - a_t_gen ** 2)       # (num_gen_steps, hidden_size)
+        print(f"已获取 a_t 完整向量，shape: {a_t_gen.shape} → hidden_ratio 向量 shape: {hr_vectors.shape}")
+    else:
+        hr_vectors = None
 
     for step_idx in range(num_steps):
         logits = scores[step_idx] / temperature  # 应用 temperature
@@ -169,26 +177,36 @@ def run_entropy_test(
         tokens_text.append(token_str)
         gate_values.append(row_sigmoid_mean[token_id].item())
 
-        if has_embeds_ratio and step_idx < gen_embeds_ratio.shape[0]:
-            embed_ratio_values.append(gen_embeds_ratio[step_idx].item())
+        if hr_vectors is not None and step_idx < hr_vectors.shape[0]:
+            hr_vec = hr_vectors[step_idx]  # (hidden_size,)
+            hr_mean_values.append(hr_vec.mean().item())
+            hr_std_values.append(hr_vec.std().item())
+            hr_min_values.append(hr_vec.min().item())
+            hr_max_values.append(hr_vec.max().item())
         else:
-            embed_ratio_values.append(float("nan"))
+            hr_mean_values.append(float("nan"))
+            hr_std_values.append(float("nan"))
+            hr_min_values.append(float("nan"))
+            hr_max_values.append(float("nan"))
 
-    # 打印所有步骤的熵、门控值和 embeds_ratio
+    # 打印所有步骤的熵、门控值和 hidden_ratio 向量统计
     print(f"\n共生成 {num_steps} 个 token")
-    print("-" * 95)
-    print(f"{'Step':>5}  {'Entropy':>10}  {'GateSigm':>10}  {'EmbedRatio':>11}  Token")
-    print("-" * 95)
+    print("-" * 115)
+    print(f"{'Step':>5}  {'Entropy':>10}  {'GateSigm':>10}  {'HR_mean':>9}  {'HR_std':>9}  {'HR_min':>9}  {'HR_max':>9}  Token")
+    print("-" * 115)
     for step_idx in range(num_steps):
         token_repr = repr(tokens_text[step_idx])
-        ratio_str = f"{embed_ratio_values[step_idx]:>11.6f}" if not np.isnan(embed_ratio_values[step_idx]) else f"{'N/A':>11}"
-        print(f"{step_idx + 1:>5}  {entropies[step_idx]:>10.4f}  {gate_values[step_idx]:>10.6f}  {ratio_str}  {token_repr}")
-    print("-" * 95)
+        if not np.isnan(hr_mean_values[step_idx]):
+            hr_str = f"{hr_mean_values[step_idx]:>9.5f}  {hr_std_values[step_idx]:>9.5f}  {hr_min_values[step_idx]:>9.5f}  {hr_max_values[step_idx]:>9.5f}"
+        else:
+            hr_str = f"{'N/A':>9}  {'N/A':>9}  {'N/A':>9}  {'N/A':>9}"
+        print(f"{step_idx + 1:>5}  {entropies[step_idx]:>10.4f}  {gate_values[step_idx]:>10.6f}  {hr_str}  {token_repr}")
+    print("-" * 115)
 
     # 统计摘要
     ent_array = np.array(entropies)
     gate_array = np.array(gate_values)
-    ratio_array = np.array(embed_ratio_values)
+    hr_mean_array = np.array(hr_mean_values)
     print(f"\n信息熵统计:")
     print(f"  平均值: {ent_array.mean():.4f}")
     print(f"  标准差: {ent_array.std():.4f}")
@@ -198,44 +216,52 @@ def run_entropy_test(
     print(f"  平均值: {gate_array.mean():.6f}")
     print(f"  最小值: {gate_array.min():.6f} (step {gate_array.argmin() + 1})")
     print(f"  最大值: {gate_array.max():.6f} (step {gate_array.argmax() + 1})")
-    if has_embeds_ratio:
-        valid_ratio = ratio_array[~np.isnan(ratio_array)]
-        if len(valid_ratio) > 0:
-            print(f"\nEmbeds Ratio 统计:")
-            print(f"  平均值: {valid_ratio.mean():.6f}")
-            print(f"  标准差: {valid_ratio.std():.6f}")
-            print(f"  最小值: {valid_ratio.min():.6f} (step {np.nanargmin(ratio_array) + 1})")
-            print(f"  最大值: {valid_ratio.max():.6f} (step {np.nanargmax(ratio_array) + 1})")
+    if has_a_t:
+        valid_mask = ~np.isnan(hr_mean_array)
+        valid_hr_mean = hr_mean_array[valid_mask]
+        if len(valid_hr_mean) > 0:
+            print(f"\nHidden Ratio 向量统计 (= sqrt(1 - a_t²), per dimension):")
+            print(f"  各步 HR_mean 的均值: {valid_hr_mean.mean():.6f}")
+            print(f"  各步 HR_mean 的标准差: {valid_hr_mean.std():.6f}")
+            print(f"  HR_mean 最小步: {valid_hr_mean.min():.6f} (step {np.nanargmin(hr_mean_array) + 1})")
+            print(f"  HR_mean 最大步: {valid_hr_mean.max():.6f} (step {np.nanargmax(hr_mean_array) + 1})")
+            all_hr_flat = hr_vectors[valid_mask[:hr_vectors.shape[0]]].numpy()
+            print(f"  全维度全步骤统计: mean={all_hr_flat.mean():.6f}, std={all_hr_flat.std():.6f}, "
+                  f"min={all_hr_flat.min():.6f}, max={all_hr_flat.max():.6f}")
 
     # 打印熵最高的 Top-20 步骤
     top_k = min(20, num_steps)
     top_indices = np.argsort(ent_array)[::-1][:top_k]
     print(f"\n熵最高的 Top-{top_k} 步骤:")
-    print("-" * 95)
-    print(f"{'Rank':>4}  {'Step':>5}  {'Entropy':>10}  {'GateSigm':>10}  {'EmbedRatio':>11}  Token")
-    print("-" * 95)
+    print("-" * 105)
+    print(f"{'Rank':>4}  {'Step':>5}  {'Entropy':>10}  {'GateSigm':>10}  {'HR_mean':>9}  {'HR_std':>9}  Token")
+    print("-" * 105)
     for rank, idx in enumerate(top_indices):
         token_repr = repr(tokens_text[idx])
-        ratio_str = f"{embed_ratio_values[idx]:>11.6f}" if not np.isnan(embed_ratio_values[idx]) else f"{'N/A':>11}"
-        print(f"{rank + 1:>4}  {idx + 1:>5}  {entropies[idx]:>10.4f}  {gate_values[idx]:>10.6f}  {ratio_str}  {token_repr}")
-    print("-" * 95)
+        if not np.isnan(hr_mean_values[idx]):
+            hr_str = f"{hr_mean_values[idx]:>9.5f}  {hr_std_values[idx]:>9.5f}"
+        else:
+            hr_str = f"{'N/A':>9}  {'N/A':>9}"
+        print(f"{rank + 1:>4}  {idx + 1:>5}  {entropies[idx]:>10.4f}  {gate_values[idx]:>10.6f}  {hr_str}  {token_repr}")
+    print("-" * 105)
 
-    # 打印 Embed Ratio 最低的 Top-20 步骤
-    if has_embeds_ratio:
-        valid_mask = ~np.isnan(ratio_array)
+    # 打印 Hidden Ratio(mean) 最高的 Top-20 步骤（隐藏思维占比最大的步骤）
+    if has_a_t:
+        valid_mask = ~np.isnan(hr_mean_array)
         if valid_mask.sum() > 0:
-            low_k = min(20, int(valid_mask.sum()))
-            sorted_ratio_indices = np.argsort(np.where(valid_mask, ratio_array, np.inf))[:low_k]
-            print(f"\nEmbed Ratio 最低的 Top-{low_k} 步骤:")
-            print("-" * 95)
-            print(f"{'Rank':>4}  {'Step':>5}  {'EmbedRatio':>11}  {'Entropy':>10}  {'GateSigm':>10}  Token")
-            print("-" * 95)
+            top_hr_k = min(20, int(valid_mask.sum()))
+            sorted_ratio_indices = np.argsort(np.where(valid_mask, hr_mean_array, -np.inf))[::-1][:top_hr_k]
+            print(f"\nHidden Ratio(mean) 最高的 Top-{top_hr_k} 步骤:")
+            print("-" * 115)
+            print(f"{'Rank':>4}  {'Step':>5}  {'HR_mean':>9}  {'HR_std':>9}  {'HR_min':>9}  {'HR_max':>9}  {'Entropy':>10}  Token")
+            print("-" * 115)
             for rank, idx in enumerate(sorted_ratio_indices):
                 token_repr = repr(tokens_text[idx])
-                print(f"{rank + 1:>4}  {idx + 1:>5}  {embed_ratio_values[idx]:>11.6f}  {entropies[idx]:>10.4f}  {gate_values[idx]:>10.6f}  {token_repr}")
-            print("-" * 95)
+                print(f"{rank + 1:>4}  {idx + 1:>5}  {hr_mean_values[idx]:>9.5f}  {hr_std_values[idx]:>9.5f}  "
+                      f"{hr_min_values[idx]:>9.5f}  {hr_max_values[idx]:>9.5f}  {entropies[idx]:>10.4f}  {token_repr}")
+            print("-" * 115)
 
-    # ---- 6. 绘制折线图（双 Y 轴：Entropy + Gate Sigmoid + Embed Ratio）----
+    # ---- 6. 绘制折线图（双 Y 轴：Entropy + Gate Sigmoid + Hidden Ratio）----
     fig, ax1 = plt.subplots(figsize=(14, 5))
     steps = np.arange(1, num_steps + 1)
 
@@ -246,14 +272,14 @@ def run_entropy_test(
     ax1.set_ylabel("Entropy (nats)", fontsize=12, color=color_entropy)
     ax1.tick_params(axis="y", labelcolor=color_entropy)
 
-    # 右 Y 轴：Gate Sigmoid Mean + Embed Ratio（共享 0~1 范围）
+    # 右 Y 轴：Gate Sigmoid Mean + Hidden Ratio（共享 0~1 范围）
     ax2 = ax1.twinx()
     color_gate = "darkorange"
     ax2.plot(steps, gate_values, linewidth=0.8, color=color_gate, alpha=0.7, label="Gate Sigmoid")
-    if has_embeds_ratio:
+    if has_a_t:
         color_ratio = "forestgreen"
-        ax2.plot(steps, embed_ratio_values, linewidth=0.8, color=color_ratio, alpha=0.7, label="Embed Ratio")
-    ax2.set_ylabel("Gate Sigmoid / Embed Ratio", fontsize=12, color=color_gate)
+        ax2.plot(steps, hr_mean_values, linewidth=0.8, color=color_ratio, alpha=0.7, label="Hidden Ratio (mean)")
+    ax2.set_ylabel("Gate Sigmoid / Hidden Ratio", fontsize=12, color=color_gate)
     ax2.tick_params(axis="y", labelcolor=color_gate)
 
     # 标注 #### 答案标记位置
@@ -278,7 +304,7 @@ def run_entropy_test(
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper right", fontsize=10)
 
-    ax1.set_title("Token-level Entropy, Gate Sigmoid & Embed Ratio during Generation", fontsize=14)
+    ax1.set_title("Token-level Entropy, Gate Sigmoid & Hidden Ratio during Generation", fontsize=14)
     ax1.grid(True, alpha=0.3)
     fig.tight_layout()
 
@@ -291,8 +317,9 @@ def run_entropy_test(
     print(f"\n折线图已保存至: {plot_path}")
     plt.close(fig)
 
-    # ---- 6.5 Embed Ratio 与 Entropy 关联性分析 ----
-    if has_embeds_ratio:
+    # ---- 6.5 Hidden Ratio(mean) 与 Entropy 关联性分析 ----
+    ratio_array = hr_mean_array  # 用于关联性分析的是每步 hidden_ratio 向量的均值
+    if has_a_t:
         valid_mask = ~np.isnan(ratio_array)
         r_valid = ratio_array[valid_mask]
         e_valid = ent_array[valid_mask]
@@ -303,7 +330,7 @@ def run_entropy_test(
             spearman_r, spearman_p = stats.spearmanr(r_valid, e_valid)
 
             print("\n" + "=" * 60)
-            print("【Embed Ratio ↔ Entropy 关联性分析】")
+            print("【Hidden Ratio(mean) ↔ Entropy 关联性分析】")
             print("=" * 60)
             print(f"  Pearson  r = {pearson_r:+.4f}  (p = {pearson_p:.2e})")
             print(f"  Spearman ρ = {spearman_r:+.4f}  (p = {spearman_p:.2e})")
@@ -323,22 +350,23 @@ def run_entropy_test(
             # --- (b) Top-N 重叠分析 ---
             overlap_k = min(20, len(r_valid))
             top_entropy_set = set(np.argsort(ent_array)[::-1][:overlap_k])
-            low_ratio_set = set(np.argsort(np.where(valid_mask, ratio_array, np.inf))[:overlap_k])
-            overlap = top_entropy_set & low_ratio_set
+            high_ratio_set = set(np.argsort(np.where(valid_mask, ratio_array, -np.inf))[::-1][:overlap_k])
+            overlap = top_entropy_set & high_ratio_set
             print(f"\n  Top-{overlap_k} 重叠分析:")
-            print(f"    熵最高 {overlap_k} 步 ∩ Ratio最低 {overlap_k} 步 = {len(overlap)} 步重叠")
+            print(f"    熵最高 {overlap_k} 步 ∩ HR_mean最高 {overlap_k} 步 = {len(overlap)} 步重叠")
             print(f"    重叠率: {len(overlap)/overlap_k*100:.1f}%")
             if overlap:
-                overlap_sorted = sorted(overlap, key=lambda i: ratio_array[i])
-                print(f"    重叠步骤 (按 Ratio 升序):")
+                overlap_sorted = sorted(overlap, key=lambda i: ratio_array[i], reverse=True)
+                print(f"    重叠步骤 (按 HR_mean 降序):")
                 for idx in overlap_sorted:
-                    print(f"      Step {idx+1:>4}: Ratio={embed_ratio_values[idx]:.6f}, Entropy={entropies[idx]:.4f}, Token={repr(tokens_text[idx])}")
+                    print(f"      Step {idx+1:>4}: HR_mean={hr_mean_values[idx]:.6f}, HR_std={hr_std_values[idx]:.6f}, "
+                          f"Entropy={entropies[idx]:.4f}, Token={repr(tokens_text[idx])}")
 
             # --- (c) 分箱统计 ---
             n_bins = 5
             bin_edges = np.linspace(r_valid.min(), r_valid.max() + 1e-9, n_bins + 1)
             print(f"\n  分箱统计 ({n_bins} 等宽区间):")
-            print(f"  {'Ratio 区间':>25}  {'样本数':>6}  {'平均Entropy':>12}  {'Entropy标准差':>13}")
+            print(f"  {'HR_mean 区间':>25}  {'样本数':>6}  {'平均Entropy':>12}  {'Entropy标准差':>13}")
             print("  " + "-" * 62)
             bin_mean_entropy = []
             bin_centers = []
@@ -364,7 +392,7 @@ def run_entropy_test(
             x_fit = np.linspace(r_valid.min(), r_valid.max(), 100)
             ax_scatter.plot(x_fit, slope * x_fit + intercept, color="red", linewidth=1.5,
                             label=f"y={slope:.2f}x+{intercept:.2f}")
-            ax_scatter.set_xlabel("Embed Ratio", fontsize=12)
+            ax_scatter.set_xlabel("Hidden Ratio (mean over dims)", fontsize=12)
             ax_scatter.set_ylabel("Entropy (nats)", fontsize=12)
             ax_scatter.set_title(f"Scatter: Pearson r={pearson_r:+.3f}, Spearman ρ={spearman_r:+.3f}", fontsize=11)
             ax_scatter.legend(fontsize=10)
@@ -375,13 +403,13 @@ def run_entropy_test(
                 bar_width = (bin_edges[1] - bin_edges[0]) * 0.7
                 ax_bin.bar(bin_centers, bin_mean_entropy, width=bar_width,
                            color="steelblue", alpha=0.7, edgecolor="white")
-                ax_bin.set_xlabel("Embed Ratio (bin center)", fontsize=12)
+                ax_bin.set_xlabel("Hidden Ratio mean (bin center)", fontsize=12)
                 ax_bin.set_ylabel("Mean Entropy (nats)", fontsize=12)
-                ax_bin.set_title("Binned: Mean Entropy per Embed Ratio Range", fontsize=11)
+                ax_bin.set_title("Binned: Mean Entropy per Hidden Ratio Range", fontsize=11)
                 ax_bin.grid(True, alpha=0.3, axis="y")
 
             fig_corr.tight_layout()
-            corr_path = os.path.join(save_dir, "embed_ratio_entropy_correlation.png")
+            corr_path = os.path.join(save_dir, "hidden_ratio_entropy_correlation.png")
             fig_corr.savefig(corr_path, dpi=150)
             print(f"\n关联性分析图已保存至: {corr_path}")
             plt.close(fig_corr)
@@ -414,7 +442,10 @@ def run_entropy_test(
         "gate_sigmoid_mean": float(gate_array.mean()),
         "entropies": [float(e) for e in entropies],
         "gate_values": [float(g) for g in gate_values],
-        "embed_ratio_values": [float(r) if not np.isnan(r) else None for r in embed_ratio_values],
+        "hidden_ratio_mean": [float(r) if not np.isnan(r) else None for r in hr_mean_values],
+        "hidden_ratio_std": [float(r) if not np.isnan(r) else None for r in hr_std_values],
+        "hidden_ratio_min": [float(r) if not np.isnan(r) else None for r in hr_min_values],
+        "hidden_ratio_max": [float(r) if not np.isnan(r) else None for r in hr_max_values],
         "correlation_stats": correlation_stats,
         "tokens": tokens_text,
     }
