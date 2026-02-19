@@ -563,6 +563,8 @@ class Qwen2Model(Qwen2PreTrainedModel):
             new_embeds: 混合后的嵌入向量
             a_t: 衰减系数
         """
+
+        ###改动点1：gate_r 计算方式
         gate_r_input = last_hs if last_hs is not None else embeds
         r_t = torch.sigmoid(self.thinking_residual_gate_r(gate_r_input))
 
