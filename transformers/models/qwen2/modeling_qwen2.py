@@ -553,7 +553,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
         
         Args:
             embeds: 当前 token 的嵌入向量 (batch, seq_len, hidden_size)
-            residual: 上一步的连续思维向量 (batch, seq_len, hidden_size)
+            residual: 上一步的连续思维向量（由断点决定） (batch, seq_len, hidden_size)
             input_ids: 当前 token 的 ID (batch, seq_len)，用于查询门控矩阵
             last_hs: 上一步 Transformer 输出的原始隐状态 (batch, seq_len, hidden_size)，
                      用于 gate_r 计算；为 None 时回退到 residual
@@ -563,8 +563,9 @@ class Qwen2Model(Qwen2PreTrainedModel):
             new_embeds: 混合后的嵌入向量
             a_t: 衰减系数
         """
-        gate_r_input = last_hs if last_hs is not None else residual
+        gate_r_input = last_hs if last_hs is not None else embeds
         r_t = torch.sigmoid(self.thinking_residual_gate_r(gate_r_input))
+        
         a_t = self.thinking_residual_Lambda(r_t)
 
         # [当前] i_t 基于 embeds 计算，continuous_thinking = sqrt(1 - a_t^2) * (i_t * residual)
