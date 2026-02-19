@@ -6,6 +6,7 @@ PatchFastRL("GRPO", FastLanguageModel)
 import os
 import json
 import argparse
+import torch
 from trl import GRPOConfig, GRPOTrainer
 from datasets import load_dataset, Dataset
 from patch import patch_trainer_optimizer
@@ -62,6 +63,8 @@ def main(args):
             "thinking_residual_gate_r",
             "thinking_residual_gate_i",
             "thinking_residual_Lambda",
+            "thinking_residual_head",
+            "token_gate_matrix",
         ], 
         lora_alpha = args.lora_rank * 2,
         use_gradient_checkpointing = "unsloth",
@@ -70,6 +73,26 @@ def main(args):
     model.model.model.thinking_residual_Lambda.reset_lambda_parameters(
         r_min = args.residual_r_min, r_max = args.residual_r_max,
     )
+
+    import torch.nn as nn
+
+    head_module = model.model.model.thinking_residual_head
+    gate_module = model.model.model.token_gate_matrix
+
+    if hasattr(head_module, 'modules_to_save'):
+        head_trainable_weight = head_module.modules_to_save.default.weight
+    else:
+        head_trainable_weight = head_module.weight
+
+    if hasattr(gate_module, 'modules_to_save'):
+        gate_trainable_weight = gate_module.modules_to_save.default.weight
+    else:
+        gate_trainable_weight = gate_module.weight
+
+    nn.init.zeros_(head_trainable_weight)
+
+    token_gate_init = -2.0
+    nn.init.constant_(gate_trainable_weight, token_gate_init)
 
     training_args = GRPOConfig(
         use_vllm = False,
@@ -112,6 +135,8 @@ def main(args):
         trainer,
         args.lr_residual_gate,
         args.lr_residual_Lambda,
+        args.lr_residual_head,
+        args.lr_token_gate_matrix,
     )
     trainer.train()
 
@@ -126,6 +151,8 @@ if __name__ == "__main__":
     parser.add_argument("--residual_r_max", type=float, default=0.999)
     parser.add_argument("--lr_residual_gate", type=float, default=1e-4)
     parser.add_argument("--lr_residual_Lambda", type=float, default=1e-3)
+    parser.add_argument("--lr_residual_head", type=float, default=1e-4)
+    parser.add_argument("--lr_token_gate_matrix", type=float, default=1e-2)
     parser.add_argument("--weight_decay", type=float, default=0.1)
     parser.add_argument("--warmup_ratio", type=float, default=0.1)
     parser.add_argument("--lr_scheduler_type", type=str, default="cosine")
