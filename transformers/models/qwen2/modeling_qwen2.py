@@ -547,21 +547,24 @@ class Qwen2Model(Qwen2PreTrainedModel):
     #####HRPO主断点：HRPO核心模块，HRPO核心计算函数定义处
     #####embeds:最后一个词嵌入向量，residual此时为上一步的原始隐藏状态
     #####此处可更改连续思考的混合方法
-    def thinking_residual(self, embeds, residual, input_ids=None, eps=1e-8):
+    def thinking_residual(self, embeds, residual, input_ids=None, last_hs=None, eps=1e-8):
         """
         混合推理残差计算函数
         
         Args:
             embeds: 当前 token 的嵌入向量 (batch, seq_len, hidden_size)
-            residual: 上一步的隐藏状态 (batch, seq_len, hidden_size)
+            residual: 上一步的连续思维向量 (batch, seq_len, hidden_size)
             input_ids: 当前 token 的 ID (batch, seq_len)，用于查询门控矩阵
+            last_hs: 上一步 Transformer 输出的原始隐状态 (batch, seq_len, hidden_size)，
+                     用于 gate_r 计算；为 None 时回退到 residual
             eps: 数值稳定性参数
         
         Returns:
             new_embeds: 混合后的嵌入向量
             a_t: 衰减系数
         """
-        r_t = torch.sigmoid(self.thinking_residual_gate_r(residual))
+        gate_r_input = last_hs if last_hs is not None else residual
+        r_t = torch.sigmoid(self.thinking_residual_gate_r(gate_r_input))
         a_t = self.thinking_residual_Lambda(r_t)
 
         # [当前] i_t 基于 embeds 计算，continuous_thinking = sqrt(1 - a_t^2) * (i_t * residual)

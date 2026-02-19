@@ -945,6 +945,7 @@ def LlamaModel_fast_forward_inference(
 
     #####last_thinking_states（上一时刻的隐状态）在此时被接收和处理
     last_thinking_states = kwargs.get('last_thinking_states')
+    last_hs = kwargs.get('last_hs')
     if is_thinking is not None and last_thinking_states is not None:
         thinking_embeds = last_thinking_states
 
@@ -954,6 +955,7 @@ def LlamaModel_fast_forward_inference(
         X_hat, a_t = self.model.thinking_residual(
             X, last_thinking_states.unsqueeze(1),
             input_ids=input_ids,
+            last_hs=last_hs.unsqueeze(1) if last_hs is not None else None,
         )
 
         embeds_ratio = a_t.mean(-1).view(-1)  # 用 view(-1) 替代 squeeze()，避免 bsz=1 时变成 0 维标量

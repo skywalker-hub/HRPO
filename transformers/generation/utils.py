@@ -3286,7 +3286,7 @@ class GenerationMixin:
                 model_forward = self.get_compiled_call(generation_config.compile_config)
 
         is_prefill = True
-        is_thinking, last_thinking_states = None, None
+        is_thinking, last_thinking_states, last_hs = None, None, None
         thinking_embeds = [self.get_input_embeddings()(input_ids)] if return_thinking_embeds else []
         thinking_mask = [
             torch.zeros_like(input_ids, dtype=torch.bool, device=input_ids.device)
@@ -3311,6 +3311,7 @@ class GenerationMixin:
             # prepare is_thinking and last_thinking_states for latent reasoning
             model_inputs.update({"is_thinking": is_thinking} if is_thinking is not None else {})
             model_inputs.update({"last_thinking_states": last_thinking_states} if last_thinking_states is not None else {})
+            model_inputs.update({"last_hs": last_hs} if last_hs is not None else {})
 
             
             #####第一次迭代，处理完整的输入 prompt
@@ -3386,30 +3387,23 @@ class GenerationMixin:
             
 
 
-            #####主断点：使用主断点8处传回的原始隐状态，论文公式（3）中的h_t+1在此处计算
-            #####此处最后得到的last_thinking_states就是论文中的h_t+1
-            ##########在此处可更改连续思维h的计算方式
-            # [已注释] 使用模型输出的原始隐藏状态作为 last_thinking_states
-            # if outputs.hidden_states is not None and len(outputs.hidden_states) > 3:
-            #     hs = outputs.hidden_states[3]  # 原始隐状态 X
-            #     # prefill 阶段返回的是标准 hidden_states 元组，形状为 [batch, seq_len, hidden]
-            #     # 推理阶段返回的是自定义列表，形状为 [batch, hidden]
-            #     if hs.dim() == 3:  # prefill 阶段
-            #         last_thinking_states = hs[:, -1, :]  # 只取最后一个 token
-            #     else:  # 推理阶段
-            #         last_thinking_states = hs
-            # else:################### HRPO的隐藏状态计算
-            #     # Fallback
-            #     last_thinking_states = torch.einsum(
-            #         'bv,vd->bd', probs, self.get_input_embeddings().weight
-            #     )
-            #     last_thinking_states /= torch.sqrt((probs ** 2).sum(-1, keepdim=True)).to(last_thinking_states.dtype)
+            #####主断点：论文公式（3）中的 h_t+1 在此处计算
+            ##########在此处可更改连续思维 h 的计算方式
 
-            # [当前] 使用 probs + embedding 加权方式计算 last_thinking_states
+            # ① 先提取原始隐状态 last_hs（每步都记录，可选择供 thinking_residual gate_r 使用）
+            if outputs.hidden_states is not None and len(outputs.hidden_states) > 3:
+                hs = outputs.hidden_states[3]
+                last_hs = hs[:, -1, :] if hs.dim() == 3 else hs
+
+            # ② 选择当前的 last_thinking_states 计算方式—— 切换方案只需注释/取消注释即可
+            # [方案A - 当前] probs + embedding 加权
             last_thinking_states = torch.einsum(
                 'bv,vd->bd', probs, self.get_input_embeddings().weight
             )
             last_thinking_states /= torch.sqrt((probs ** 2).sum(-1, keepdim=True)).to(last_thinking_states.dtype)
+            
+            # [方案B] 直接使用原始隐状态
+            # last_thinking_states = last_hs
 
 
 
