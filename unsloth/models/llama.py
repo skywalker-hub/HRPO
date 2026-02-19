@@ -949,7 +949,7 @@ def LlamaModel_fast_forward_inference(
         thinking_embeds = last_thinking_states
 
         ##############主断点11：HRPO实际调用处
-        ##############上一时刻的隐状态，上一时刻的embedd在这里送往HRPO进行计算得出混合向量，再送入attention计算
+        ##############上一时刻的隐状态和embedd在这里送往HRPO进行计算得出混合向量，再送入attention计算
         # 传入 input_ids 用于查询 token 门控矩阵
         X_hat, a_t = self.model.thinking_residual(
             X, last_thinking_states.unsqueeze(1),
