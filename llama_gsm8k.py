@@ -14,9 +14,23 @@ from utils import *
 os.environ["WANDB_PROJECT"] = "latent-reasoning"
 
 
+def process_gsm8k_base(batch):
+    """Base 模型专用：纯文本 prompt，不使用 chat template 特殊 token"""
+    prompts = [
+        f"Solve the following math problem step by step. "
+        f"Put your final numeric answer after ####.\n\n"
+        f"Question: {q.strip()}\n\nAnswer:"
+        for q in batch["question"]
+    ]
+    return {
+        "prompt": prompts,
+        "answer": [extract_hash_answer(a) for a in batch["answer"]]
+    }
+
+
 def preprocess_gsm8k(split="train", chunk_size=1000) -> Dataset:
     dataset = load_dataset('openai/gsm8k', 'main')[split]
-    return dataset.map(process_gsm8k, batched=True, 
+    return dataset.map(process_gsm8k_base, batched=True, 
                        batch_size=chunk_size, load_from_cache_file=False)
 
 
@@ -32,17 +46,6 @@ def main(args):
 
     tokenizer.padding_side = "left"
     tokenizer.pad_token = tokenizer.eos_token
-
-    if not getattr(tokenizer, "chat_template", None):
-        tokenizer.chat_template = (
-            "{% set loop_messages = messages %}"
-            "{% for message in loop_messages %}"
-            "{% set content = '<|start_header_id|>' + message['role'] + '<|end_header_id|>\n\n' + message['content'] | trim + '<|eot_id|>' %}"
-            "{% if loop.index0 == 0 %}{% set content = bos_token + content %}{% endif %}"
-            "{{ content }}"
-            "{% endfor %}"
-            "{% if add_generation_prompt %}{{ '<|start_header_id|>assistant<|end_header_id|>\n\n' }}{% endif %}"
-        )
 
     model = FastLanguageModel.get_peft_model(
         model,
