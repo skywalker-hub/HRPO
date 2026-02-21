@@ -38,7 +38,10 @@ def extract_boxed_answer(text: str) -> str | None:
 
 def get_reward_func(process_answer_func):
     def reward_func(completions, answer, **kwargs) -> list[float]:
-        responses = [completion[0]["content"] for completion in completions]
+        responses = [
+            c[0]["content"] if isinstance(c, list) else c
+            for c in completions
+        ]
 
         ans = [process_answer_func(a) for a in answer]
         extracted = [extract_from_response(r) for r in responses]
@@ -76,7 +79,10 @@ def get_reward_func(process_answer_func):
 
 
 def reward_func_rag(completions, answer, **kwargs) -> list[float]:
-    responses = [completion[0]["content"] for completion in completions]
+    responses = [
+        c[0]["content"] if isinstance(c, list) else c
+        for c in completions
+    ]
 
     extracted = [extract_from_response(r) for r in responses]
     predictions = [process_qa_answer(r) for r in extracted]
