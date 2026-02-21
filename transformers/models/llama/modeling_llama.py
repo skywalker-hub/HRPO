@@ -536,12 +536,19 @@ class LlamaModel(LlamaPreTrainedModel):
         self.rotary_emb = LlamaRotaryEmbedding(config=config)
         self.gradient_checkpointing = False
 
+        ############## HRPO 核心模块定义处
         self.thinking_residual_gate_r = nn.Linear(config.hidden_size, config.hidden_size)
         self.thinking_residual_gate_i = nn.Linear(config.hidden_size, config.hidden_size)
         self.thinking_residual_Lambda = ThinkingResidualLambda(config)
-        
+
         # 新增：隐状态变换头，将原始隐状态投影到 thinking residual 空间
         self.thinking_residual_head = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
+
+        # 新增：Token 门控矩阵，基于离散 token ID 的可学习门控
+        # 形状：(vocab_size, hidden_size)，与 embed_tokens 一致
+        # 注意：这里的初始化会被 post_init() 中的 _init_weights() 覆盖
+        # 真正的初始化在训练脚本 (hrpo_gsm8k.py) 中对 modules_to_save.default.weight 进行
+        self.token_gate_matrix = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=self.padding_idx)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -552,12 +559,49 @@ class LlamaModel(LlamaPreTrainedModel):
     def set_input_embeddings(self, value):
         self.embed_tokens = value
 
-    def thinking_residual(self, embeds, residual, eps=1e-8):
-        r_t = torch.sigmoid(self.thinking_residual_gate_r(embeds))
-        i_t = torch.sigmoid(self.thinking_residual_gate_i(embeds))
+    #####HRPO主断点：HRPO核心模块，HRPO核心计算函数定义处
+    #####embeds:最后一个词嵌入向量，residual此时为上一步的原始隐藏状态
+    #####此处可更改连续思考的混合方法
+    def thinking_residual(self, embeds, residual, input_ids=None, last_hs=None, eps=1e-8):
+        """
+        混合推理残差计算函数
+
+        Args:
+            embeds: 当前 token 的嵌入向量 (batch, seq_len, hidden_size)
+            residual: 上一步的连续思维向量（由断点决定） (batch, seq_len, hidden_size)
+            input_ids: 当前 token 的 ID (batch, seq_len)，用于查询门控矩阵
+            last_hs: 上一步 Transformer 输出的原始隐状态 (batch, seq_len, hidden_size)，
+                     用于 gate_r 计算；为 None 时回退到 residual
+            eps: 数值稳定性参数
+
+        Returns:
+            new_embeds: 混合后的嵌入向量
+            a_t: 衰减系数
+        """
+
+        ###改动点1：gate_r 计算方式
+        gate_r_input = last_hs if last_hs is not None else embeds
+        r_t = torch.sigmoid(self.thinking_residual_gate_r(gate_r_input))
+
         a_t = self.thinking_residual_Lambda(r_t)
-        h_residual = self.thinking_residual_head(residual)  # ← 现在训练时也会被调用！
-        return a_t * embeds + torch.sqrt(1 - a_t.pow(2) + eps) * (i_t * h_residual), a_t
+
+        # [当前] i_t 基于 embeds 计算，continuous_thinking = sqrt(1 - a_t^2) * (i_t * residual)
+        i_t = torch.sigmoid(self.thinking_residual_gate_i(embeds))
+
+        discrete_thinking = a_t * embeds
+        continuous_thinking = torch.sqrt(1 - a_t.pow(2) + eps) * (i_t * residual)
+
+        # 监控：计算离散/连续思维的模值比例（detach 避免影响梯度）
+        if self.training:
+            with torch.no_grad():
+                discrete_norm = discrete_thinking.detach().norm(dim=-1).mean()
+                continuous_norm = continuous_thinking.detach().norm(dim=-1).mean()
+                total_norm = discrete_norm + continuous_norm + eps
+                self._discrete_norm = discrete_norm.item()
+                self._continuous_norm = continuous_norm.item()
+                self._thinking_norm_ratio = continuous_norm.item() / total_norm.item()
+
+        return discrete_thinking + continuous_thinking, a_t
 
     @add_start_docstrings_to_model_forward(LLAMA_INPUTS_DOCSTRING)
     def forward(
