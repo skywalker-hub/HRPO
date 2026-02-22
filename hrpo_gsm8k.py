@@ -85,7 +85,7 @@ def main(args):
         output_dir = exp_name,
     )
 
-    dataset = preprocess_gsm8k('train', chunk_size=500)
+    dataset = preprocess_gsm8k('train', chunk_size=500) 
     trainer = GRPOTrainer(
         model = model,
         processing_class = tokenizer,
