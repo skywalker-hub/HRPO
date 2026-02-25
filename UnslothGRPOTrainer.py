@@ -178,6 +178,7 @@ def grpo_accumulated_loss(
     logits_to_keep,
     completion_mask,
     advantages,
+    saved_last_hs = None,
     n_chunks = -1,
 ):
 
@@ -203,7 +204,8 @@ def grpo_accumulated_loss(
 
         if thinking_embeds is not None: thinking_embeds = thinking_embeds.clone()
         if thinking_mask is not None: thinking_mask = thinking_mask.clone()
-        new_hidden_states = trainer.model(input_ids = input_ids, inputs_embeds = thinking_embeds, thinking_mask = thinking_mask, logits_to_keep = logits_to_keep + 1).logits
+        if saved_last_hs is not None: saved_last_hs = saved_last_hs.clone()
+        new_hidden_states = trainer.model(input_ids = input_ids, inputs_embeds = thinking_embeds, thinking_mask = thinking_mask, saved_last_hs = saved_last_hs, logits_to_keep = logits_to_keep + 1).logits
         
         loss, completion_length, mean_kl = UnslothEfficientGRPO.apply(
             new_hidden_states, old_hidden_states, lm_head,
@@ -988,7 +990,7 @@ class _UnslothGRPOTrainer(Trainer):
             # Regular generation path
             ####训练断点：已确认训练经过，生成第一次前向，此处开始多端口
             with unwrap_model_for_generation(self.model, self.accelerator) as unwrapped_model:
-                prompt_completion_ids, thinking_embeds, thinking_mask, embeds_ratio = unwrapped_model.generate(
+                prompt_completion_ids, thinking_embeds, thinking_mask, embeds_ratio, saved_last_hs = unwrapped_model.generate(
                     prompt_ids, attention_mask=prompt_mask, 
                     generation_config=self.generation_config,
                     processing_class=self.processing_class,
@@ -1121,6 +1123,7 @@ class _UnslothGRPOTrainer(Trainer):
             "thinking_embeds": thinking_embeds,
             "thinking_mask": thinking_mask,
             "embeds_ratio": embeds_ratio,
+            "saved_last_hs": saved_last_hs,
             "ref_per_token_logps": ref_per_token_logps,
             "advantages": advantages,
         }
@@ -1135,6 +1138,7 @@ class _UnslothGRPOTrainer(Trainer):
         prompt_ids, prompt_mask = inputs["prompt_ids"], inputs["prompt_mask"]
         completion_ids, completion_mask = inputs["completion_ids"], inputs["completion_mask"]
         thinking_embeds, thinking_mask = inputs["thinking_embeds"], inputs["thinking_mask"]
+        saved_last_hs = inputs["saved_last_hs"]
         input_ids = torch.cat([prompt_ids, completion_ids], dim=1)
         bsz, qlen = input_ids.shape
         attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
@@ -1142,6 +1146,7 @@ class _UnslothGRPOTrainer(Trainer):
         logits_to_keep = completion_ids.size(1)  # we only need to compute the logits for the completion tokens
         _input_ids = input_ids
         _thinking_embeds = thinking_embeds
+        _saved_last_hs = saved_last_hs
         _logits_to_keep = logits_to_keep
         
         per_token_logps = self._get_per_token_logps(model, input_ids, thinking_embeds, attention_mask, logits_to_keep)
@@ -1166,6 +1171,7 @@ class _UnslothGRPOTrainer(Trainer):
             ###############训练来过：grpo_accumulated_loss回到这里
             loss, completion_length, mean_kl = grpo_accumulated_loss(
                 self, _input_ids, _thinking_embeds, thinking_mask, logits_to_keep, completion_mask, advantages,
+                saved_last_hs = _saved_last_hs,
                 n_chunks = self.args.unsloth_num_chunks,
             )
 

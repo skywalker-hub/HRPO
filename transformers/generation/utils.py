@@ -3295,6 +3295,9 @@ class GenerationMixin:
             torch.ones_like(input_ids, dtype=torch.float32, device=input_ids.device)
         ] if return_thinking_embeds else []
         a_t_vectors = [] if return_thinking_embeds else None
+        last_hs_list = [
+            torch.zeros_like(thinking_embeds[0]) if thinking_embeds else None
+        ] if return_thinking_embeds else []
 
 
         #####主断点6:前向最外层循环：第1层
@@ -3391,6 +3394,9 @@ class GenerationMixin:
             #####主断点：论文公式（3）中的 h_t+1 在此处计算
             ##########在此处可更改连续思维 h 的计算方式
 
+            # 保存本步 thinking_residual 实际使用的 last_hs（更新前的值）
+            _last_hs_used_this_step = last_hs
+
             # ① 先提取原始隐状态 last_hs（每步都记录，可选择供 thinking_residual gate_r 使用）
             if outputs.hidden_states is not None and len(outputs.hidden_states) > 3:
                 hs = outputs.hidden_states[3]
@@ -3418,6 +3424,10 @@ class GenerationMixin:
                 )
                 if len(outputs.hidden_states) > 4 and outputs.hidden_states[4] is not None:
                     a_t_vectors.append(outputs.hidden_states[4].unsqueeze(1))
+                if _last_hs_used_this_step is not None:
+                    last_hs_list.append(_last_hs_used_this_step.unsqueeze(1))
+                else:
+                    last_hs_list.append(torch.zeros_like(outputs.hidden_states[0].unsqueeze(1)))
 
             unfinished_sequences = unfinished_sequences & ~stopping_criteria(input_ids, scores)
             this_peer_finished = unfinished_sequences.max() == 0
@@ -3468,7 +3478,8 @@ class GenerationMixin:
                 embeds_ratio.append(
                     torch.ones_like(input_ids[:, -1:], dtype=torch.float32, device=input_ids.device)
                 )
-                return input_ids, torch.cat(thinking_embeds, dim=1), torch.cat(thinking_mask, dim=1), torch.cat(embeds_ratio, dim=1)
+                last_hs_list.append(torch.zeros_like(thinking_embeds[-1]))
+                return input_ids, torch.cat(thinking_embeds, dim=1), torch.cat(thinking_mask, dim=1), torch.cat(embeds_ratio, dim=1), torch.cat(last_hs_list, dim=1)
             else:
                 return input_ids
 

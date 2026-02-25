@@ -517,6 +517,7 @@ class GRPOTrainer(Trainer):
             if is_peft_model(unwrapped_model):
                 unwrapped_model.unmerge_adapter()
 
+    ########训练断点：rollout实际执行处
     def _prepare_inputs(self, inputs: dict[str, Union[torch.Tensor, Any]]) -> dict[str, Union[torch.Tensor, Any]]:
         device = self.accelerator.device
         prompts = [x["prompt"] for x in inputs]
@@ -560,8 +561,10 @@ class GRPOTrainer(Trainer):
             prompt_completion_ids = torch.cat([prompt_ids, completion_ids], dim=1)
         else:
             # Regular generation path
+            ########训练断点：rollout实际执行
             with unwrap_model_for_generation(self.model, self.accelerator) as unwrapped_model:
-                prompt_completion_ids, thinking_embeds, thinking_mask, embeds_ratio = unwrapped_model.generate(
+                #prompt_completion_ids, thinking_embeds, thinking_mask, embeds_ratio = unwrapped_model.generate(
+                prompt_completion_ids, thinking_embeds, thinking_mask, embeds_ratio, saved_last_hs = unwrapped_model.generate(
                     prompt_ids, attention_mask=prompt_mask, 
                     generation_config=self.generation_config,
                     processing_class=self.processing_class,
@@ -691,6 +694,7 @@ class GRPOTrainer(Trainer):
             "thinking_embeds": thinking_embeds,
             "thinking_mask": thinking_mask,
             "embeds_ratio": embeds_ratio,
+            "saved_last_hs": saved_last_hs,
             "ref_per_token_logps": ref_per_token_logps,
             "advantages": advantages,
         }

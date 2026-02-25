@@ -375,6 +375,8 @@ class UnslothEfficientGRPO(torch.autograd.Function):
 pass
 RL_REPLACEMENTS["UnslothEfficientGRPO"] = UnslothEfficientGRPO
 
+
+#########训练断点：策略模型实际执行处
 import os
 import numpy as np
 def grpo_accumulated_loss(
@@ -385,6 +387,7 @@ def grpo_accumulated_loss(
     logits_to_keep,
     completion_mask,
     advantages,
+    saved_last_hs = None,
     n_chunks = -1,
 ):
     # All Unsloth Zoo code licensed under LGPLv3
@@ -407,7 +410,8 @@ def grpo_accumulated_loss(
 
         if thinking_embeds is not None: thinking_embeds = thinking_embeds.clone()
         if thinking_mask is not None: thinking_mask = thinking_mask.clone()
-        new_hidden_states = trainer.model(input_ids = input_ids, inputs_embeds = thinking_embeds, thinking_mask = thinking_mask, logits_to_keep = logits_to_keep + 1).logits
+        if saved_last_hs is not None: saved_last_hs = saved_last_hs.clone()
+        new_hidden_states = trainer.model(input_ids = input_ids, inputs_embeds = thinking_embeds, thinking_mask = thinking_mask, saved_last_hs = saved_last_hs, logits_to_keep = logits_to_keep + 1).logits
         
         loss, completion_length, mean_kl = UnslothEfficientGRPO.apply(
             new_hidden_states, old_hidden_states, lm_head,
@@ -451,6 +455,7 @@ def grpo_trainer_compute_loss(function_name, function):
         prompt_ids, prompt_mask = inputs["prompt_ids"], inputs["prompt_mask"]
         completion_ids, completion_mask = inputs["completion_ids"], inputs["completion_mask"]
         thinking_embeds, thinking_mask = inputs["thinking_embeds"], inputs["thinking_mask"]
+        saved_last_hs = inputs.get("saved_last_hs")
         input_ids = torch.cat([prompt_ids, completion_ids], dim=1)
         bsz, qlen = input_ids.shape
         attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
@@ -458,6 +463,7 @@ def grpo_trainer_compute_loss(function_name, function):
         logits_to_keep = completion_ids.size(1)  # we only need to compute the logits for the completion tokens
         _input_ids = input_ids
         _thinking_embeds = thinking_embeds
+        _saved_last_hs = saved_last_hs
         _logits_to_keep = logits_to_keep
         
         per_token_logps = self._get_per_token_logps(model, input_ids, thinking_embeds, attention_mask, logits_to_keep)
@@ -479,6 +485,7 @@ def grpo_trainer_compute_loss(function_name, function):
         else:
             loss, completion_length, mean_kl = grpo_accumulated_loss(
                 self, _input_ids, _thinking_embeds, thinking_mask, logits_to_keep, completion_mask, advantages,
+                saved_last_hs = _saved_last_hs,
                 n_chunks = self.args.unsloth_num_chunks,
             )
 

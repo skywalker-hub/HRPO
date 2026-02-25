@@ -663,11 +663,14 @@ def LlamaModel_fast_forward(
     thinking_mask = kwargs.get('thinking_mask')
     if thinking_mask is not None:
         new_inputs_embeds = inputs_embeds.clone()
-        # 传入 input_ids 用于查询 token 门控矩阵
+        ########训练断点：回放时HRPO执行处
         masked_input_ids = input_ids[thinking_mask] if input_ids is not None else None
+        saved_last_hs = kwargs.get('saved_last_hs')
+        masked_last_hs = saved_last_hs[thinking_mask] if saved_last_hs is not None else None
         new_inputs_embeds[thinking_mask] = self.thinking_residual(
             inputs_embeds[thinking_mask], thinking_embeds[thinking_mask],
             input_ids=masked_input_ids,
+            last_hs=masked_last_hs,
         )[0].to(inputs_embeds.dtype)
         inputs_embeds = new_inputs_embeds
 
