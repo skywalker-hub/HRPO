@@ -230,7 +230,7 @@ def run_entropy_test(
                   f"min={all_hr_flat.min():.6f}, max={all_hr_flat.max():.6f}")
 
     # 打印熵最高的 Top-20 步骤
-    top_k = min(20, num_steps)
+    top_k = min(50, num_steps)
     top_indices = np.argsort(ent_array)[::-1][:top_k]
     print(f"\n熵最高的 Top-{top_k} 步骤:")
     print("-" * 105)
@@ -249,7 +249,7 @@ def run_entropy_test(
     if has_a_t:
         valid_mask = ~np.isnan(hr_mean_array)
         if valid_mask.sum() > 0:
-            top_hr_k = min(20, int(valid_mask.sum()))
+            top_hr_k = min(50, int(valid_mask.sum()))
             sorted_ratio_indices = np.argsort(np.where(valid_mask, hr_mean_array, -np.inf))[::-1][:top_hr_k]
             print(f"\nHidden Ratio(mean) 最高的 Top-{top_hr_k} 步骤:")
             print("-" * 115)
