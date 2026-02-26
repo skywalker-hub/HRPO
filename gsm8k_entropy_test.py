@@ -14,7 +14,7 @@ from utils import *
 
 
 # ====== 在此处修改测试问题 ======
-QUESTION = "A new program had 60 downloads in the first month. The number of downloads in the second month was three times as many as the downloads in the first month, but then reduced by 30% in the third month. How many downloads did the program have total over the three months?"
+QUESTION = "A regular hexagon can be divided into six equilateral triangles. If the perimeter of one of the triangles is 21 inches, what is the perimeter, in inches, of the regular hexagon?"
 # ================================
 
 
