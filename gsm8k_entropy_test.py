@@ -383,36 +383,221 @@ def run_entropy_test(
                 label = f"[{bin_edges[b]:.4f}, {bin_edges[b+1]:.4f})"
                 print(f"  {label:>25}  {cnt:>6}  {mean_e:>12.4f}  {std_e:>13.4f}")
 
-            # --- (d) 绘制关联性图 (2x1 子图) ---
-            fig_corr, (ax_scatter, ax_bin) = plt.subplots(1, 2, figsize=(14, 5))
+            # --- (d) 按 Entropy 分箱统计 HR_mean（直接验证：高熵 → 低 HR_mean？）---
+            n_ent_bins = 5
+            ent_bin_edges = np.linspace(e_valid.min(), e_valid.max() + 1e-9, n_ent_bins + 1)
+            print(f"\n  按 Entropy 分箱统计 HR_mean ({n_ent_bins} 等宽区间) — 验证高熵→低HR_mean:")
+            print(f"  {'Entropy 区间':>28}  {'样本数':>6}  {'平均HR_mean':>12}  {'HR_mean标准差':>13}  {'中位HR_mean':>12}")
+            print("  " + "-" * 78)
+            ent_bin_hr_means = []
+            ent_bin_centers = []
+            ent_bin_hr_collections = []
+            for b in range(n_ent_bins):
+                mask_bin = (e_valid >= ent_bin_edges[b]) & (e_valid < ent_bin_edges[b + 1])
+                cnt = mask_bin.sum()
+                if cnt > 0:
+                    hr_in_bin = r_valid[mask_bin]
+                    mean_hr = hr_in_bin.mean()
+                    std_hr = hr_in_bin.std()
+                    median_hr = np.median(hr_in_bin)
+                    ent_bin_hr_means.append(mean_hr)
+                    ent_bin_centers.append((ent_bin_edges[b] + ent_bin_edges[b + 1]) / 2)
+                    ent_bin_hr_collections.append(hr_in_bin)
+                else:
+                    mean_hr = std_hr = median_hr = float("nan")
+                    ent_bin_hr_collections.append(np.array([]))
+                label = f"[{ent_bin_edges[b]:.4f}, {ent_bin_edges[b+1]:.4f})"
+                print(f"  {label:>28}  {cnt:>6}  {mean_hr:>12.6f}  {std_hr:>13.6f}  {median_hr:>12.6f}")
 
-            # 左图：散点图 + 回归线
-            ax_scatter.scatter(r_valid, e_valid, s=10, alpha=0.5, color="steelblue", edgecolors="none")
-            slope, intercept = np.polyfit(r_valid, e_valid, 1)
-            x_fit = np.linspace(r_valid.min(), r_valid.max(), 100)
+            if len(ent_bin_hr_means) >= 2:
+                trend_r, trend_p = stats.pearsonr(ent_bin_centers, ent_bin_hr_means)
+                trend_dir = "↓ 高熵对应低HR_mean（负趋势）" if trend_r < 0 else "↑ 高熵对应高HR_mean（正趋势）"
+                print(f"  → 箱间趋势 Pearson r = {trend_r:+.4f} (p = {trend_p:.2e})  {trend_dir}")
+
+            # --- (e) 高熵 vs 低熵分组统计检验 ---
+            ent_median = np.median(e_valid)
+            high_ent_mask = e_valid >= ent_median
+            low_ent_mask = e_valid < ent_median
+            hr_high_ent = r_valid[high_ent_mask]
+            hr_low_ent = r_valid[low_ent_mask]
+
+            print(f"\n  高熵 vs 低熵分组 (以中位数 Entropy={ent_median:.4f} 为界):")
+            print(f"    低熵组 (n={len(hr_low_ent):>4}): HR_mean 均值={hr_low_ent.mean():.6f}, "
+                  f"中位数={np.median(hr_low_ent):.6f}, std={hr_low_ent.std():.6f}")
+            print(f"    高熵组 (n={len(hr_high_ent):>4}): HR_mean 均值={hr_high_ent.mean():.6f}, "
+                  f"中位数={np.median(hr_high_ent):.6f}, std={hr_high_ent.std():.6f}")
+            hr_diff = hr_high_ent.mean() - hr_low_ent.mean()
+            print(f"    差值 (高熵 - 低熵): {hr_diff:+.6f}")
+
+            if len(hr_high_ent) >= 3 and len(hr_low_ent) >= 3:
+                u_stat, u_p = stats.mannwhitneyu(hr_high_ent, hr_low_ent, alternative="two-sided")
+                print(f"    Mann-Whitney U 检验: U={u_stat:.1f}, p={u_p:.2e}")
+                if u_p < 0.05:
+                    print(f"    → p < 0.05, 两组 HR_mean 差异显著{'（高熵组更低）' if hr_diff < 0 else '（高熵组更高）'}")
+                else:
+                    print(f"    → p >= 0.05, 两组 HR_mean 差异不显著")
+
+            # --- (f) Entropy 四分位数对应的 HR_mean ---
+            quartile_labels = ["Q1 (最低25%)", "Q2 (25-50%)", "Q3 (50-75%)", "Q4 (最高25%)"]
+            ent_quartiles = np.percentile(e_valid, [25, 50, 75])
+            q_edges = [e_valid.min(), ent_quartiles[0], ent_quartiles[1], ent_quartiles[2], e_valid.max() + 1e-9]
+            print(f"\n  Entropy 四分位对应 HR_mean:")
+            print(f"  {'分位':>16}  {'Entropy范围':>28}  {'样本数':>6}  {'HR_mean均值':>12}  {'HR_mean中位':>12}")
+            print("  " + "-" * 80)
+            quartile_hr_data = []
+            for q in range(4):
+                qmask = (e_valid >= q_edges[q]) & (e_valid < q_edges[q + 1])
+                qcnt = qmask.sum()
+                qhr = r_valid[qmask]
+                quartile_hr_data.append(qhr)
+                q_mean = qhr.mean() if qcnt > 0 else float("nan")
+                q_median = np.median(qhr) if qcnt > 0 else float("nan")
+                label = f"[{q_edges[q]:.4f}, {q_edges[q+1]:.4f})"
+                print(f"  {quartile_labels[q]:>16}  {label:>28}  {qcnt:>6}  {q_mean:>12.6f}  {q_median:>12.6f}")
+
+            if len(quartile_hr_data[0]) >= 3 and len(quartile_hr_data[3]) >= 3:
+                u_q, p_q = stats.mannwhitneyu(quartile_hr_data[3], quartile_hr_data[0], alternative="two-sided")
+                q4_mean = quartile_hr_data[3].mean()
+                q1_mean = quartile_hr_data[0].mean()
+                print(f"  Q4 vs Q1: HR_mean差={q4_mean - q1_mean:+.6f}, Mann-Whitney p={p_q:.2e}")
+
+            # --- (g) 绘制关联性图 (2x2 子图) ---
+            fig_corr, axes = plt.subplots(2, 2, figsize=(14, 10))
+            ax_scatter, ax_bin, ax_ent_bin, ax_box = axes[0, 0], axes[0, 1], axes[1, 0], axes[1, 1]
+
+            # 左上：散点图 + 回归线 (Entropy vs HR_mean)
+            ax_scatter.scatter(e_valid, r_valid, s=10, alpha=0.5, color="steelblue", edgecolors="none")
+            slope, intercept = np.polyfit(e_valid, r_valid, 1)
+            x_fit = np.linspace(e_valid.min(), e_valid.max(), 100)
             ax_scatter.plot(x_fit, slope * x_fit + intercept, color="red", linewidth=1.5,
-                            label=f"y={slope:.2f}x+{intercept:.2f}")
-            ax_scatter.set_xlabel("Hidden Ratio (mean over dims)", fontsize=12)
-            ax_scatter.set_ylabel("Entropy (nats)", fontsize=12)
+                            label=f"y={slope:.4f}x+{intercept:.4f}")
+            ax_scatter.set_xlabel("Entropy (nats)", fontsize=11)
+            ax_scatter.set_ylabel("Hidden Ratio (mean)", fontsize=11)
             ax_scatter.set_title(f"Scatter: Pearson r={pearson_r:+.3f}, Spearman ρ={spearman_r:+.3f}", fontsize=11)
-            ax_scatter.legend(fontsize=10)
+            ax_scatter.legend(fontsize=9)
             ax_scatter.grid(True, alpha=0.3)
 
-            # 右图：分箱柱状图
+            # 右上：按 HR_mean 分箱的 Entropy 柱状图（原有）
             if bin_centers:
                 bar_width = (bin_edges[1] - bin_edges[0]) * 0.7
                 ax_bin.bar(bin_centers, bin_mean_entropy, width=bar_width,
                            color="steelblue", alpha=0.7, edgecolor="white")
-                ax_bin.set_xlabel("Hidden Ratio mean (bin center)", fontsize=12)
-                ax_bin.set_ylabel("Mean Entropy (nats)", fontsize=12)
-                ax_bin.set_title("Binned: Mean Entropy per Hidden Ratio Range", fontsize=11)
+                ax_bin.set_xlabel("Hidden Ratio mean (bin center)", fontsize=11)
+                ax_bin.set_ylabel("Mean Entropy (nats)", fontsize=11)
+                ax_bin.set_title("Binned: Mean Entropy per HR_mean Range", fontsize=11)
                 ax_bin.grid(True, alpha=0.3, axis="y")
 
+            # 左下：按 Entropy 分箱的 HR_mean 柱状图（核心：高熵→低HR_mean？）
+            if ent_bin_centers:
+                ent_bar_width = (ent_bin_edges[1] - ent_bin_edges[0]) * 0.7
+                colors_bar = plt.cm.RdYlGn_r(np.linspace(0.2, 0.8, len(ent_bin_centers)))
+                ax_ent_bin.bar(ent_bin_centers, ent_bin_hr_means, width=ent_bar_width,
+                               color=colors_bar, alpha=0.8, edgecolor="white")
+                ax_ent_bin.set_xlabel("Entropy (bin center)", fontsize=11)
+                ax_ent_bin.set_ylabel("Mean HR_mean", fontsize=11)
+                ax_ent_bin.set_title("Key: Mean HR_mean per Entropy Range", fontsize=11, fontweight="bold")
+                ax_ent_bin.grid(True, alpha=0.3, axis="y")
+                if len(ent_bin_centers) >= 2:
+                    z = np.polyfit(ent_bin_centers, ent_bin_hr_means, 1)
+                    xf = np.linspace(min(ent_bin_centers), max(ent_bin_centers), 50)
+                    ax_ent_bin.plot(xf, np.polyval(z, xf), "r--", linewidth=1.5, label=f"趋势线 k={z[0]:+.4f}")
+                    ax_ent_bin.legend(fontsize=9)
+
+            # 右下：Entropy 四分位的 HR_mean 箱线图
+            box_data = [qd for qd in quartile_hr_data if len(qd) > 0]
+            box_labels = [quartile_labels[i] for i in range(4) if len(quartile_hr_data[i]) > 0]
+            if box_data:
+                bp = ax_box.boxplot(box_data, labels=box_labels, patch_artist=True, widths=0.5)
+                quartile_colors = ["#2ecc71", "#f1c40f", "#e67e22", "#e74c3c"]
+                for patch, color in zip(bp["boxes"], quartile_colors[:len(box_data)]):
+                    patch.set_facecolor(color)
+                    patch.set_alpha(0.6)
+                ax_box.set_xlabel("Entropy Quartile", fontsize=11)
+                ax_box.set_ylabel("HR_mean", fontsize=11)
+                ax_box.set_title("HR_mean Distribution by Entropy Quartile", fontsize=11)
+                ax_box.grid(True, alpha=0.3, axis="y")
+
+            fig_corr.suptitle("Does Higher Entropy → Lower HR_mean?", fontsize=14, fontweight="bold", y=1.01)
             fig_corr.tight_layout()
-            corr_path = os.path.join(save_dir, "hidden_ratio_entropy_correlation.png")
-            fig_corr.savefig(corr_path, dpi=150)
+            corr_path = os.path.join(save_dir, "entropy_hr_mean_analysis.png")
+            fig_corr.savefig(corr_path, dpi=150, bbox_inches="tight")
             print(f"\n关联性分析图已保存至: {corr_path}")
             plt.close(fig_corr)
+
+            # --- (h) 移动平均趋势图 ---
+            sort_idx = np.argsort(e_valid)
+            e_sorted = e_valid[sort_idx]
+            r_sorted = r_valid[sort_idx]
+            window = max(5, len(e_sorted) // 20)
+            if len(e_sorted) > window:
+                e_ma = np.convolve(e_sorted, np.ones(window)/window, mode="valid")
+                r_ma = np.convolve(r_sorted, np.ones(window)/window, mode="valid")
+                fig_ma, ax_ma = plt.subplots(figsize=(12, 5))
+                ax_ma.scatter(e_valid, r_valid, s=8, alpha=0.3, color="gray", label="原始数据")
+                ax_ma.plot(e_ma, r_ma, linewidth=2, color="red", label=f"移动平均 (window={window})")
+                ax_ma.set_xlabel("Entropy (nats)", fontsize=12)
+                ax_ma.set_ylabel("HR_mean", fontsize=12)
+                ax_ma.set_title("Moving Average: HR_mean vs Entropy", fontsize=13)
+                ax_ma.legend(fontsize=10)
+                ax_ma.grid(True, alpha=0.3)
+                fig_ma.tight_layout()
+                ma_path = os.path.join(save_dir, "entropy_hr_mean_moving_avg.png")
+                fig_ma.savefig(ma_path, dpi=150)
+                print(f"移动平均趋势图已保存至: {ma_path}")
+                plt.close(fig_ma)
+
+            # 汇总结论
+            print("\n" + "=" * 60)
+            print("【结论汇总】高熵是否对应低 HR_mean？")
+            print("=" * 60)
+            evidence_for = 0
+            evidence_against = 0
+
+            if pearson_r < 0:
+                evidence_for += 1
+                print(f"  ✓ Pearson r={pearson_r:+.4f} 为负相关 (p={pearson_p:.2e})")
+            else:
+                evidence_against += 1
+                print(f"  ✗ Pearson r={pearson_r:+.4f} 为正相关 (p={pearson_p:.2e})")
+
+            if spearman_r < 0:
+                evidence_for += 1
+                print(f"  ✓ Spearman ρ={spearman_r:+.4f} 为负相关 (p={spearman_p:.2e})")
+            else:
+                evidence_against += 1
+                print(f"  ✗ Spearman ρ={spearman_r:+.4f} 为正相关 (p={spearman_p:.2e})")
+
+            if hr_diff < 0:
+                evidence_for += 1
+                print(f"  ✓ 高熵组 HR_mean 比低熵组低 {abs(hr_diff):.6f}")
+            else:
+                evidence_against += 1
+                print(f"  ✗ 高熵组 HR_mean 比低熵组高 {abs(hr_diff):.6f}")
+
+            if len(quartile_hr_data[0]) > 0 and len(quartile_hr_data[3]) > 0:
+                if quartile_hr_data[3].mean() < quartile_hr_data[0].mean():
+                    evidence_for += 1
+                    print(f"  ✓ Q4(最高熵) HR_mean < Q1(最低熵) HR_mean")
+                else:
+                    evidence_against += 1
+                    print(f"  ✗ Q4(最高熵) HR_mean >= Q1(最低熵) HR_mean")
+
+            if len(ent_bin_hr_means) >= 2 and trend_r < 0:
+                evidence_for += 1
+                print(f"  ✓ 分箱趋势线斜率为负 (r={trend_r:+.4f})")
+            elif len(ent_bin_hr_means) >= 2:
+                evidence_against += 1
+                print(f"  ✗ 分箱趋势线斜率为正 (r={trend_r:+.4f})")
+
+            total = evidence_for + evidence_against
+            print(f"\n  → 支持「高熵→低HR_mean」的证据: {evidence_for}/{total}")
+            print(f"  → 反对的证据: {evidence_against}/{total}")
+            if evidence_for > evidence_against:
+                print(f"  ★ 综合判断: 数据支持「熵越高, HR_mean 越低」的假设")
+            elif evidence_for == evidence_against:
+                print(f"  ★ 综合判断: 证据各半, 关系不明确")
+            else:
+                print(f"  ★ 综合判断: 数据不支持「熵越高, HR_mean 越低」的假设")
 
             correlation_stats = {
                 "pearson_r": float(pearson_r),
@@ -422,6 +607,13 @@ def run_entropy_test(
                 "top_overlap_k": overlap_k,
                 "top_overlap_count": len(overlap),
                 "top_overlap_steps": sorted([int(i + 1) for i in overlap]),
+                "high_entropy_group_hr_mean": float(hr_high_ent.mean()),
+                "low_entropy_group_hr_mean": float(hr_low_ent.mean()),
+                "hr_diff_high_minus_low": float(hr_diff),
+                "entropy_binned_hr_means": [float(x) for x in ent_bin_hr_means],
+                "entropy_bin_centers": [float(x) for x in ent_bin_centers],
+                "evidence_for_hypothesis": evidence_for,
+                "evidence_against_hypothesis": evidence_against,
             }
         else:
             correlation_stats = None
