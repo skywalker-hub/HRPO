@@ -988,7 +988,7 @@ class _UnslothGRPOTrainer(Trainer):
             prompt_completion_ids = torch.cat([prompt_ids, completion_ids], dim=1)
         else:
             # Regular generation path
-            ####训练断点：已确认训练经过，生成第一次前向，此处开始多端口
+            ####训练断点：已确认训练经过，生成第一次前向，此处开始多端口进行多组采样
             with unwrap_model_for_generation(self.model, self.accelerator) as unwrapped_model:
                 prompt_completion_ids, thinking_embeds, thinking_mask, embeds_ratio, saved_last_hs = unwrapped_model.generate(
                     prompt_ids, attention_mask=prompt_mask, 
@@ -1067,6 +1067,7 @@ class _UnslothGRPOTrainer(Trainer):
         # Apply weights to each reward function's output and sum
         rewards = (rewards_per_func * self.reward_weights.to(device).unsqueeze(0)).sum(dim=1)
 
+        # 计算奖励均值和归一化
         # Compute grouped-wise rewards
         mean_grouped_rewards = rewards.view(-1, self.num_generations).mean(dim=1)
         std_grouped_rewards = rewards.view(-1, self.num_generations).std(dim=1)
