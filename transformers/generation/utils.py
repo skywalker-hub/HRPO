@@ -163,6 +163,8 @@ class GenerateDecoderOnlyOutput(ModelOutput):
     attentions: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
     hidden_states: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
     past_key_values: Optional[Tuple[Tuple[Tuple[torch.FloatTensor]]]] = None
+    token_probs: Optional[torch.FloatTensor] = None        # 每个生成位置选中 token 的概率, (batch, num_steps)
+    token_entropies: Optional[torch.FloatTensor] = None     # 每个生成位置的分布熵, (batch, num_steps)
 
 
 @dataclass
@@ -3299,6 +3301,9 @@ class GenerationMixin:
             torch.zeros_like(thinking_embeds[0]) if thinking_embeds else None
         ] if return_thinking_embeds else []
 
+        # 逐位置记录：选中 token 的概率 & 分布熵（训练和推理均可用）
+        token_probs_list = []       # 每步 append shape (batch_size,)
+        token_entropies_list = []   # 每步 append shape (batch_size,)
 
         #####主断点6:前向最外层循环：第1层
 ############################################################################
@@ -3379,6 +3384,14 @@ class GenerationMixin:
             # finished sentences should have their next token be a padding token
             if has_eos_stopping_criteria:
                 next_tokens = next_tokens * unfinished_sequences + pad_token_id * (1 - unfinished_sequences)
+
+            # 记录选中 token 的概率：从 softmax 分布中 gather 出 next_tokens 对应的概率值
+            selected_probs = probs.gather(-1, next_tokens.unsqueeze(-1)).squeeze(-1)  # (batch_size,)
+            token_probs_list.append(selected_probs.detach())
+
+            # 记录当前位置的分布熵 H = -Σ p·log(p)，加 1e-10 防止 log(0)
+            token_entropy = -(probs * torch.log(probs + 1e-10)).sum(dim=-1)  # (batch_size,)
+            token_entropies_list.append(token_entropy.detach())
 
             # 将抽样得到的id拼接得到序列
             # update generated ids, model inputs, and length for next step
@@ -3468,6 +3481,10 @@ class GenerationMixin:
                     result.embeds_ratio = torch.cat(embeds_ratio, dim=1)
                 if return_thinking_embeds and a_t_vectors:
                     result.a_t_vectors = torch.cat(a_t_vectors, dim=1)
+                # 附加逐位置指标：选中 token 概率 & 分布熵
+                if token_probs_list:
+                    result.token_probs = torch.stack(token_probs_list, dim=1)        # (batch, num_steps)
+                    result.token_entropies = torch.stack(token_entropies_list, dim=1) # (batch, num_steps)
                 return result
         else:
             if return_thinking_embeds:
@@ -3479,7 +3496,10 @@ class GenerationMixin:
                     torch.ones_like(input_ids[:, -1:], dtype=torch.float32, device=input_ids.device)
                 )
                 last_hs_list.append(torch.zeros_like(thinking_embeds[-1]))
-                return input_ids, torch.cat(thinking_embeds, dim=1), torch.cat(thinking_mask, dim=1), torch.cat(embeds_ratio, dim=1), torch.cat(last_hs_list, dim=1)
+                # 拼接逐位置指标，追加在 tuple 末尾返回
+                _token_probs = torch.stack(token_probs_list, dim=1) if token_probs_list else torch.zeros(input_ids.shape[0], 0, device=input_ids.device)
+                _token_entropies = torch.stack(token_entropies_list, dim=1) if token_entropies_list else torch.zeros(input_ids.shape[0], 0, device=input_ids.device)
+                return input_ids, torch.cat(thinking_embeds, dim=1), torch.cat(thinking_mask, dim=1), torch.cat(embeds_ratio, dim=1), torch.cat(last_hs_list, dim=1), _token_probs, _token_entropies
             else:
                 return input_ids
 

@@ -563,8 +563,7 @@ class GRPOTrainer(Trainer):
             # Regular generation path
             ########训练断点：rollout实际执行
             with unwrap_model_for_generation(self.model, self.accelerator) as unwrapped_model:
-                #prompt_completion_ids, thinking_embeds, thinking_mask, embeds_ratio = unwrapped_model.generate(
-                prompt_completion_ids, thinking_embeds, thinking_mask, embeds_ratio, saved_last_hs = unwrapped_model.generate(
+                prompt_completion_ids, thinking_embeds, thinking_mask, embeds_ratio, saved_last_hs, token_probs, token_entropies = unwrapped_model.generate(
                     prompt_ids, attention_mask=prompt_mask, 
                     generation_config=self.generation_config,
                     processing_class=self.processing_class,
@@ -695,6 +694,8 @@ class GRPOTrainer(Trainer):
             "thinking_mask": thinking_mask,
             "embeds_ratio": embeds_ratio,
             "saved_last_hs": saved_last_hs,
+            "token_probs": token_probs,           # 每个生成位置选中 token 的概率
+            "token_entropies": token_entropies,    # 每个生成位置的分布熵
             "ref_per_token_logps": ref_per_token_logps,
             "advantages": advantages,
         }
