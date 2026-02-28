@@ -3427,7 +3427,7 @@ class GenerationMixin:
 
 
 
-            if return_thinking_embeds and outputs.hidden_states is not None and len(outputs.hidden_states) > 2:
+            if return_thinking_embeds and outputs.hidden_states is not None:
                 thinking_embeds.append(outputs.hidden_states[0].unsqueeze(1))
                 thinking_mask.append(
                     torch.tensor(outputs.hidden_states[1], device=input_ids.device).unsqueeze(1)
