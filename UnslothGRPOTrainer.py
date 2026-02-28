@@ -196,8 +196,11 @@ def grpo_accumulated_loss(
     completion_input_ids = input_ids[:, -logits_to_keep:]
     lm_head = trainer.model.get_output_embeddings().weight
 
-    ###############训练来过：
+    ###############训练断点：最重要的前向
     with torch.amp.autocast(device_type = "cuda", dtype = mixed_dtype):
+        ####训练断点：
+        # 前向2
+        # 参考前向
         with torch.inference_mode(), trainer.accelerator.unwrap_model(trainer.model, keep_fp32_wrapper = False).disable_adapter():
             old_hidden_states = trainer.model(input_ids = input_ids, logits_to_keep = logits_to_keep + 1).logits
         pass
@@ -205,6 +208,10 @@ def grpo_accumulated_loss(
         if thinking_embeds is not None: thinking_embeds = thinking_embeds.clone()
         if thinking_mask is not None: thinking_mask = thinking_mask.clone()
         if saved_last_hs is not None: saved_last_hs = saved_last_hs.clone()
+
+        ####训练断点：
+        # 前向3
+        # 策略前向
         new_hidden_states = trainer.model(input_ids = input_ids, inputs_embeds = thinking_embeds, thinking_mask = thinking_mask, saved_last_hs = saved_last_hs, logits_to_keep = logits_to_keep + 1).logits
         
         loss, completion_length, mean_kl = UnslothEfficientGRPO.apply(
@@ -988,7 +995,9 @@ class _UnslothGRPOTrainer(Trainer):
             prompt_completion_ids = torch.cat([prompt_ids, completion_ids], dim=1)
         else:
             # Regular generation path
-            ####训练断点：已确认训练经过，生成第一次前向，此处开始多端口
+            #######训练断点：
+            # 前向1
+            ##已确认训练经过，此处开始多端口。生成第一次前向，这里生成多组回答。
             with unwrap_model_for_generation(self.model, self.accelerator) as unwrapped_model:
                 prompt_completion_ids, thinking_embeds, thinking_mask, embeds_ratio, saved_last_hs, token_probs, token_entropies = unwrapped_model.generate(
                     prompt_ids, attention_mask=prompt_mask, 

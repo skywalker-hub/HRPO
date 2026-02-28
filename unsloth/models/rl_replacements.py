@@ -404,6 +404,9 @@ def grpo_accumulated_loss(
     lm_head = trainer.model.get_output_embeddings().weight
 
     with torch.amp.autocast(device_type = "cuda", dtype = mixed_dtype):
+         ####训练断点：
+        # 前向2
+        # 参考前向
         with torch.inference_mode(), trainer.accelerator.unwrap_model(trainer.model, keep_fp32_wrapper = False).disable_adapter():
             old_hidden_states = trainer.model(input_ids = input_ids, logits_to_keep = logits_to_keep + 1).logits
         pass
@@ -411,6 +414,10 @@ def grpo_accumulated_loss(
         if thinking_embeds is not None: thinking_embeds = thinking_embeds.clone()
         if thinking_mask is not None: thinking_mask = thinking_mask.clone()
         if saved_last_hs is not None: saved_last_hs = saved_last_hs.clone()
+        
+        ####训练断点：
+        # 前向3
+        # 策略前向
         new_hidden_states = trainer.model(input_ids = input_ids, inputs_embeds = thinking_embeds, thinking_mask = thinking_mask, saved_last_hs = saved_last_hs, logits_to_keep = logits_to_keep + 1).logits
         
         loss, completion_length, mean_kl = UnslothEfficientGRPO.apply(
