@@ -403,6 +403,7 @@ def grpo_accumulated_loss(
     completion_input_ids = input_ids[:, -logits_to_keep:]
     lm_head = trainer.model.get_output_embeddings().weight
 
+    ###############训练断点：最重要的前向
     with torch.amp.autocast(device_type = "cuda", dtype = mixed_dtype):
          ####训练断点：
         # 前向2
@@ -414,7 +415,7 @@ def grpo_accumulated_loss(
         if thinking_embeds is not None: thinking_embeds = thinking_embeds.clone()
         if thinking_mask is not None: thinking_mask = thinking_mask.clone()
         if saved_last_hs is not None: saved_last_hs = saved_last_hs.clone()
-        
+
         ####训练断点：
         # 前向3
         # 策略前向
