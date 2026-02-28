@@ -1021,6 +1021,7 @@ def LlamaModel_fast_forward_inference(
         variance = variance,
     )
 
+    ###断点：前向返回
     return BaseModelOutputWithPast(
         last_hidden_state = X,
         past_key_values = next_decoder_cache,
