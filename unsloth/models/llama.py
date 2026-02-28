@@ -593,6 +593,9 @@ def LlamaModel_fast_forward(
     *args, **kwargs,
 ) -> Union[Tuple, BaseModelOutputWithPast]:
     
+    ####此函数为训练时专用，推理时不用
+
+
     output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
     assert(output_attentions is False)
     output_hidden_states = (
@@ -935,6 +938,7 @@ def LlamaModel_fast_forward_inference(
     attention_mask = None,
     *args, **kwargs,
 ):
+    ####此函数为推理时专用，训练时不用
     ######主断点10：核心第3层
     input_ids = input_ids[:,:self.max_seq_length]
     bsz, q_len = input_ids.shape
