@@ -516,7 +516,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
         self.gradient_checkpointing = False
 
         ############## HRPO 核心模块定义处  
-        self.thinking_residual_gate_r = nn.Linear(config.hidden_size, config.hidden_size)
+        self.thinking_residual_gate_r = nn.Linear(config.hidden_size * 2, config.hidden_size)
         self.thinking_residual_gate_i = nn.Linear(config.hidden_size, config.hidden_size)
         self.thinking_residual_Lambda = ThinkingResidualLambda(config)
         
@@ -564,8 +564,10 @@ class Qwen2Model(Qwen2PreTrainedModel):
             a_t: 衰减系数
         """
 
-        ###改动点1：gate_r 计算方式
-        gate_r_input = last_hs if last_hs is not None else embeds
+        ###改动点1：gate_r 计算方式 —— 拼接 embeds 与 last_hs 作为联合输入
+        if last_hs is None:
+            last_hs = torch.zeros_like(embeds)
+        gate_r_input = torch.cat([embeds, last_hs], dim=-1)  # (batch, seq_len, 2 * hidden_size)
         r_t = torch.sigmoid(self.thinking_residual_gate_r(gate_r_input))
 
         a_t = self.thinking_residual_Lambda(r_t)
