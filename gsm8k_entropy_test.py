@@ -168,7 +168,7 @@ def run_entropy_test(
         hr_vectors = None
 
     for step_idx in range(num_steps):
-        logits = scores[step_idx] / temperature  # 应用 temperature
+        logits = scores[step_idx]   # 应用 temperature
         entropy = compute_entropy(logits)
         entropies.append(entropy)
 
