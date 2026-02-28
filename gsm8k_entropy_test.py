@@ -256,14 +256,14 @@ def run_entropy_test(
             top_hr_k = min(50, int(valid_mask.sum()))
             sorted_ratio_indices = np.argsort(np.where(valid_mask, hr_mean_array, -np.inf))[::-1][:top_hr_k]
             print(f"\nHidden Ratio(mean) 最高的 Top-{top_hr_k} 步骤:")
-            print("-" * 115)
-            print(f"{'Rank':>4}  {'Step':>5}  {'HR_mean':>9}  {'HR_std':>9}  {'HR_min':>9}  {'HR_max':>9}  {'Entropy':>10}  Token")
-            print("-" * 115)
+            print("-" * 125)
+            print(f"{'Rank':>4}  {'Step':>5}  {'Prob':>8}  {'HR_mean':>9}  {'HR_std':>9}  {'HR_min':>9}  {'HR_max':>9}  {'Entropy':>10}  Token")
+            print("-" * 125)
             for rank, idx in enumerate(sorted_ratio_indices):
                 token_repr = repr(tokens_text[idx])
-                print(f"{rank + 1:>4}  {idx + 1:>5}  {hr_mean_values[idx]:>9.5f}  {hr_std_values[idx]:>9.5f}  "
+                print(f"{rank + 1:>4}  {idx + 1:>5}  {token_probs_values[idx]:>8.4f}  {hr_mean_values[idx]:>9.5f}  {hr_std_values[idx]:>9.5f}  "
                       f"{hr_min_values[idx]:>9.5f}  {hr_max_values[idx]:>9.5f}  {entropies[idx]:>10.4f}  {token_repr}")
-            print("-" * 115)
+            print("-" * 125)
 
     # ---- 6. 绘制折线图（双 Y 轴：Entropy + Gate Sigmoid + Hidden Ratio）----
     fig, ax1 = plt.subplots(figsize=(14, 5))
