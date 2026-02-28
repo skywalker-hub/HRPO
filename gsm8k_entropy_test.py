@@ -142,13 +142,15 @@ def run_entropy_test(
     print(f"\n【提取的答案】{generated_answer}")
     print("=" * 60)
 
-    # ---- 5. 从 scores 逐步计算信息熵 ----
-    # outputs.scores 是一个 tuple，每个元素 shape (1, vocab_size)，对应每步的 logits
-    # 注意：这些 logits 已经是 temperature 缩放前的原始值，generate 内部会再做 temperature
-    # 因此这里手动除以 temperature 以反映实际采样时的概率分布
-    scores = outputs.scores
-    num_steps = len(scores)
-    entropies = []
+    # ---- 5. 直接从 generate() 返回值中获取逐位置指标 ----
+    # token_entropies: (batch, num_steps) — 每步 softmax 分布的熵
+    # token_probs:     (batch, num_steps) — 每步选中 token 的概率
+    entropies_tensor = outputs.token_entropies[0].cpu().float()   # (num_steps,)
+    token_probs_tensor = outputs.token_probs[0].cpu().float()     # (num_steps,)
+    num_steps = entropies_tensor.shape[0]
+    entropies = entropies_tensor.tolist()
+    token_probs_values = token_probs_tensor.tolist()
+
     gate_values = []
     tokens_text = []
     # hidden_ratio 向量统计 (per-step, per-dimension)
@@ -168,10 +170,6 @@ def run_entropy_test(
         hr_vectors = None
 
     for step_idx in range(num_steps):
-        logits = scores[step_idx]   # 应用 temperature
-        entropy = compute_entropy(logits)
-        entropies.append(entropy)
-
         token_id = generated_ids[step_idx].item()
         token_str = tokenizer.decode([token_id])
         tokens_text.append(token_str)
@@ -191,22 +189,28 @@ def run_entropy_test(
 
     # 打印所有步骤的熵、门控值和 hidden_ratio 向量统计
     print(f"\n共生成 {num_steps} 个 token")
-    print("-" * 115)
-    print(f"{'Step':>5}  {'Entropy':>10}  {'GateSigm':>10}  {'HR_mean':>9}  {'HR_std':>9}  {'HR_min':>9}  {'HR_max':>9}  Token")
-    print("-" * 115)
+    print("-" * 128)
+    print(f"{'Step':>5}  {'Prob':>8}  {'Entropy':>10}  {'GateSigm':>10}  {'HR_mean':>9}  {'HR_std':>9}  {'HR_min':>9}  {'HR_max':>9}  Token")
+    print("-" * 128)
     for step_idx in range(num_steps):
         token_repr = repr(tokens_text[step_idx])
         if not np.isnan(hr_mean_values[step_idx]):
             hr_str = f"{hr_mean_values[step_idx]:>9.5f}  {hr_std_values[step_idx]:>9.5f}  {hr_min_values[step_idx]:>9.5f}  {hr_max_values[step_idx]:>9.5f}"
         else:
             hr_str = f"{'N/A':>9}  {'N/A':>9}  {'N/A':>9}  {'N/A':>9}"
-        print(f"{step_idx + 1:>5}  {entropies[step_idx]:>10.4f}  {gate_values[step_idx]:>10.6f}  {hr_str}  {token_repr}")
-    print("-" * 115)
+        print(f"{step_idx + 1:>5}  {token_probs_values[step_idx]:>8.4f}  {entropies[step_idx]:>10.4f}  {gate_values[step_idx]:>10.6f}  {hr_str}  {token_repr}")
+    print("-" * 128)
 
     # 统计摘要
     ent_array = np.array(entropies)
+    prob_array = np.array(token_probs_values)
     gate_array = np.array(gate_values)
     hr_mean_array = np.array(hr_mean_values)
+    print(f"\n选中 Token 概率统计:")
+    print(f"  平均值: {prob_array.mean():.6f}")
+    print(f"  标准差: {prob_array.std():.6f}")
+    print(f"  最小值: {prob_array.min():.6f} (step {prob_array.argmin() + 1})")
+    print(f"  最大值: {prob_array.max():.6f} (step {prob_array.argmax() + 1})")
     print(f"\n信息熵统计:")
     print(f"  平均值: {ent_array.mean():.4f}")
     print(f"  标准差: {ent_array.std():.4f}")
@@ -233,17 +237,17 @@ def run_entropy_test(
     top_k = min(50, num_steps)
     top_indices = np.argsort(ent_array)[::-1][:top_k]
     print(f"\n熵最高的 Top-{top_k} 步骤:")
-    print("-" * 105)
-    print(f"{'Rank':>4}  {'Step':>5}  {'Entropy':>10}  {'GateSigm':>10}  {'HR_mean':>9}  {'HR_std':>9}  Token")
-    print("-" * 105)
+    print("-" * 118)
+    print(f"{'Rank':>4}  {'Step':>5}  {'Prob':>8}  {'Entropy':>10}  {'GateSigm':>10}  {'HR_mean':>9}  {'HR_std':>9}  Token")
+    print("-" * 118)
     for rank, idx in enumerate(top_indices):
         token_repr = repr(tokens_text[idx])
         if not np.isnan(hr_mean_values[idx]):
             hr_str = f"{hr_mean_values[idx]:>9.5f}  {hr_std_values[idx]:>9.5f}"
         else:
             hr_str = f"{'N/A':>9}  {'N/A':>9}"
-        print(f"{rank + 1:>4}  {idx + 1:>5}  {entropies[idx]:>10.4f}  {gate_values[idx]:>10.6f}  {hr_str}  {token_repr}")
-    print("-" * 105)
+        print(f"{rank + 1:>4}  {idx + 1:>5}  {token_probs_values[idx]:>8.4f}  {entropies[idx]:>10.4f}  {gate_values[idx]:>10.6f}  {hr_str}  {token_repr}")
+    print("-" * 118)
 
     # 打印 Hidden Ratio(mean) 最高的 Top-20 步骤（隐藏思维占比最大的步骤）
     if has_a_t:
@@ -631,7 +635,10 @@ def run_entropy_test(
         "num_steps": num_steps,
         "entropy_mean": float(ent_array.mean()),
         "entropy_std": float(ent_array.std()),
+        "token_prob_mean": float(prob_array.mean()),
+        "token_prob_std": float(prob_array.std()),
         "gate_sigmoid_mean": float(gate_array.mean()),
+        "token_probs": token_probs_values,
         "entropies": [float(e) for e in entropies],
         "gate_values": [float(g) for g in gate_values],
         "hidden_ratio_mean": [float(r) if not np.isnan(r) else None for r in hr_mean_values],
