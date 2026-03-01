@@ -2,7 +2,7 @@ import types
 from transformers.trainer import *
 
 
-def patch_trainer_optimizer(trainer, lr_thinking_residual_gate=1e-4, thinking_residual_Lambda=1e-3, lr_thinking_residual_head=1e-4, lr_token_gate_matrix=1e-4):
+def patch_trainer_optimizer(trainer, lr_thinking_residual_gate=1e-4, thinking_residual_Lambda=1e-3, lr_thinking_residual_head=1e-4, lr_token_gate_matrix=1e-4, lr_z_proj=1e-4):
     def create_optimizer(self):
         """
         Setup the optimizer.
@@ -37,17 +37,22 @@ def patch_trainer_optimizer(trainer, lr_thinking_residual_gate=1e-4, thinking_re
             if not head_params:
                 print("    ⚠️ 未找到任何 thinking_residual_head 参数！")
             print("=" * 60)
+            # 自定义模块名集合，需从默认参数组中排除
+            _custom_modules = ("thinking_residual", "token_gate_matrix", "z_q_proj", "z_k_proj", "z_v_proj")
+            def _is_custom(n):
+                return any(m in n for m in _custom_modules)
+
             optimizer_grouped_parameters = [
                 {
                     "params": [
-                        p for n, p in opt_model.named_parameters() if ("thinking_residual" not in n and "token_gate_matrix" not in n and n in decay_parameters and p.requires_grad)
+                        p for n, p in opt_model.named_parameters() if (not _is_custom(n) and n in decay_parameters and p.requires_grad)
                     ],
                     "lr": self.args.learning_rate,
                     "weight_decay": self.args.weight_decay,
                 },
                 {
                     "params": [
-                        p for n, p in opt_model.named_parameters() if ("thinking_residual" not in n and "token_gate_matrix" not in n and n not in decay_parameters and p.requires_grad)
+                        p for n, p in opt_model.named_parameters() if (not _is_custom(n) and n not in decay_parameters and p.requires_grad)
                     ],
                     "lr": self.args.learning_rate,
                     "weight_decay": 0.0,
@@ -66,7 +71,6 @@ def patch_trainer_optimizer(trainer, lr_thinking_residual_gate=1e-4, thinking_re
                     "lr": thinking_residual_Lambda,
                     "weight_decay": self.args.weight_decay,
                 },
-                # 新增: thinking_residual_head 参数组，学习率与门控矩阵相同
                 {
                     "params": [
                         p for n, p in opt_model.named_parameters() if ("thinking_residual_head" in n and p.requires_grad)
@@ -74,12 +78,19 @@ def patch_trainer_optimizer(trainer, lr_thinking_residual_gate=1e-4, thinking_re
                     "lr": lr_thinking_residual_head,
                     "weight_decay": self.args.weight_decay,
                 },
-                # 新增: token_gate_matrix 参数组
                 {
                     "params": [
                         p for n, p in opt_model.named_parameters() if ("token_gate_matrix" in n and p.requires_grad)
                     ],
                     "lr": lr_token_gate_matrix,
+                    "weight_decay": self.args.weight_decay,
+                },
+                # 连续路径 QKV 投影矩阵参数组
+                {
+                    "params": [
+                        p for n, p in opt_model.named_parameters() if (any(z in n for z in ("z_q_proj", "z_k_proj", "z_v_proj")) and p.requires_grad)
+                    ],
+                    "lr": lr_z_proj,
                     "weight_decay": self.args.weight_decay,
                 },
             ]

@@ -41,84 +41,75 @@ def main(args):
             "gate_proj", "up_proj", "down_proj",
         ],
         modules_to_save = [
-            "thinking_residual_gate_r",
-            "thinking_residual_gate_i",
-            "thinking_residual_Lambda",
-            "thinking_residual_head",  # 新增: 隐状态变换头
-            "token_gate_matrix",  # 新增: Token 门控矩阵
+            # "thinking_residual_gate_r",
+            # "thinking_residual_gate_i",
+            # "thinking_residual_Lambda",
+            # "thinking_residual_head",
+            # "token_gate_matrix",
+            "z_q_proj",  # 连续路径 Q 投影矩阵
+            "z_k_proj",  # 连续路径 K 投影矩阵
+            "z_v_proj",  # 连续路径 V 投影矩阵
         ], 
         lora_alpha = args.lora_rank * 2,
         use_gradient_checkpointing = "unsloth",
         random_state = args.seed,
     )
-    model.model.model.thinking_residual_Lambda.reset_lambda_parameters(
-        r_min = args.residual_r_min, r_max = args.residual_r_max,
-    )
+    # model.model.model.thinking_residual_Lambda.reset_lambda_parameters(
+    #     r_min = args.residual_r_min, r_max = args.residual_r_max,
+    # )
     
     # ============ 【真正生效的初始化】 ============
     # 注意：模型定义中的初始化会被 post_init() 覆盖，PEFT 包装后需要初始化 modules_to_save.default
     # 这里才是真正决定训练初始值的地方！
     import torch.nn as nn
     
-    # 获取真正可训练的权重（PEFT 包装后是 modules_to_save.default.weight）
-    head_module = model.model.model.thinking_residual_head
-    gate_module = model.model.model.token_gate_matrix
-    
-    if hasattr(head_module, 'modules_to_save'):
-        head_trainable_weight = head_module.modules_to_save.default.weight
-    else:
-        head_trainable_weight = head_module.weight
-    
-    if hasattr(gate_module, 'modules_to_save'):
-        gate_trainable_weight = gate_module.modules_to_save.default.weight
-    else:
-        gate_trainable_weight = gate_module.weight
-    
-    # ★★★ 真正生效的初始化 ★★★
-    nn.init.zeros_(head_trainable_weight)  # thinking_residual_head: 初始化为 0
+    # # -------- 旧方案: thinking_residual 相关初始化 (已注释) --------
+    # # 获取真正可训练的权重（PEFT 包装后是 modules_to_save.default.weight）
+    # head_module = model.model.model.thinking_residual_head
+    # gate_module = model.model.model.token_gate_matrix
+    # 
+    # if hasattr(head_module, 'modules_to_save'):
+    #     head_trainable_weight = head_module.modules_to_save.default.weight
+    # else:
+    #     head_trainable_weight = head_module.weight
+    # 
+    # if hasattr(gate_module, 'modules_to_save'):
+    #     gate_trainable_weight = gate_module.modules_to_save.default.weight
+    # else:
+    #     gate_trainable_weight = gate_module.weight
+    # 
+    # nn.init.zeros_(head_trainable_weight)  # thinking_residual_head: 初始化为 0
+    # token_gate_init = -2.0
+    # nn.init.constant_(gate_trainable_weight, token_gate_init)
+    # -------- 旧方案结束 --------
 
-    ###门控初始化/监控
-    token_gate_init = -2.0  # 只在这里控制 gate 初始化值（文件名/检查都引用该值）
-    nn.init.constant_(gate_trainable_weight, token_gate_init)  # token_gate_matrix: 初始化为 -3, sigmoid(-3)≈0.047
-    # ★★★ 修改上面的值来改变初始化 ★★★
-    
-    print(f"\n初始化完成:")
-    print(f"  thinking_residual_head: 使用 {'modules_to_save.default' if hasattr(head_module, 'modules_to_save') else 'weight'}")
-    print(f"  token_gate_matrix: 使用 {'modules_to_save.default' if hasattr(gate_module, 'modules_to_save') else 'weight'}")
+    # -------- 新方案: z_*_proj 零初始化 --------
+    z_proj_names = ["z_q_proj", "z_k_proj", "z_v_proj"]
+    for proj_name in z_proj_names:
+        proj_module = getattr(model.model.model, proj_name)
+        if hasattr(proj_module, 'modules_to_save'):
+            nn.init.zeros_(proj_module.modules_to_save.default.weight)
+        else:
+            nn.init.zeros_(proj_module.weight)
 
-    ###保存文件名（init 统一使用上面 token_gate_init）
-    exp_name = (f"./test301.1/{args.model_name.split('/')[-1]}-gsm8k-group{args.group_size}"
-                f"-lora{args.lora_rank}-lr{args.lr_token_gate_matrix}-init{token_gate_init:g}"
-                f"-rmin{args.residual_r_min}-temp{args.temperature}")
+    exp_name = (f"./test301.2/{args.model_name.split('/')[-1]}-gsm8k-group{args.group_size}"
+                f"-lora{args.lora_rank}-lr{args.lr_z_proj}"
+                f"-temp{args.temperature}")
     if os.path.exists(exp_name) and len(os.listdir(exp_name)) > 0:
         print(f"Experiment {exp_name} already exists. Exiting...")
         exit()
 
-    # ============ 打印新加入矩阵的初始值情况 ============
+    # ============ 打印初始值情况 ============
     print("\n" + "=" * 60)
-    print("HRPO 新增模块初始值检查")
+    print("连续路径 QKV 投影矩阵初始值检查")
     print("=" * 60)
-    
-    # 1. thinking_residual_head 初始值（期望全为 0）
-    head_weight = head_trainable_weight.data
-    print(f"\n[thinking_residual_head]")
-    print(f"  形状: {head_weight.shape}")
-    print(f"  最小值: {head_weight.min().item():.6f}")
-    print(f"  最大值: {head_weight.max().item():.6f}")
-    print(f"  均值: {head_weight.mean().item():.6f}")
-    print(f"  是否全为0: {(head_weight == 0).all().item()}")
-    
-    # 2. token_gate_matrix 初始值（期望）
-    gate_weight = gate_trainable_weight.data
-    print(f"\n[token_gate_matrix]")
-    print(f"  形状: {gate_weight.shape}")
-    print(f"  最小值: {gate_weight.min().item():.6f}")
-    print(f"  最大值: {gate_weight.max().item():.6f}")
-    print(f"  均值: {gate_weight.mean().item():.6f}")
-    expected_gate = torch.full_like(gate_weight, float(token_gate_init))
-    print(f"  是否全为{token_gate_init:g}: {torch.allclose(gate_weight, expected_gate)}")
-    print(f"  sigmoid后的值范围: [{torch.sigmoid(gate_weight).min().item():.6f}, {torch.sigmoid(gate_weight).max().item():.6f}]")
-    
+    for proj_name in z_proj_names:
+        proj_module = getattr(model.model.model, proj_name)
+        w = proj_module.modules_to_save.default.weight.data if hasattr(proj_module, 'modules_to_save') else proj_module.weight.data
+        print(f"\n[{proj_name}]")
+        print(f"  形状: {w.shape}")
+        print(f"  是否全为0: {(w == 0).all().item()}")
+        print(f"  requires_grad: {w.requires_grad}")
     print("=" * 60 + "\n")
     # ============ 初始值检查结束 ============
 
@@ -163,40 +154,33 @@ def main(args):
         trainer,
         args.lr_residual_gate,
         args.lr_residual_Lambda,
-        args.lr_residual_head,  # 新增: 隐状态变换头的学习率
-        args.lr_token_gate_matrix,  # 新增: Token 门控矩阵的学习率
+        args.lr_residual_head,
+        args.lr_token_gate_matrix,
+        lr_z_proj = args.lr_z_proj,  # 连续路径 QKV 投影矩阵的学习率
     )
     
-    # ============ 调试：检查 token_gate_matrix 是否被正确加入优化器 ============
+    # ============ 调试：检查 z_*_proj 是否被正确加入优化器 ============
     print("\n" + "=" * 60)
     print("调试：检查参数是否在优化器中")
     print("=" * 60)
-    
-    # 检查所有参数名
-    print("\n【所有包含 'token_gate' 的参数】")
-    found_gate = False
+
+    print("\n【所有包含 'z_q_proj/z_k_proj/z_v_proj' 的参数】")
+    found_z = False
     for name, param in model.named_parameters():
-        if "token_gate" in name:
-            found_gate = True
+        if any(z in name for z in ("z_q_proj", "z_k_proj", "z_v_proj")):
+            found_z = True
             print(f"  {name}")
             print(f"    shape: {param.shape}, requires_grad: {param.requires_grad}, dtype: {param.dtype}")
-    if not found_gate:
-        print("  ⚠️ 没有找到任何包含 'token_gate' 的参数！")
-    
-    # 检查优化器中的参数组
+    if not found_z:
+        print("  WARNING: 没有找到任何 z_*_proj 参数！")
+
     print("\n【优化器参数组】")
     trainer.create_optimizer()
     for i, group in enumerate(trainer.optimizer.param_groups):
         param_count = len(group['params'])
         total_params = sum(p.numel() for p in group['params'])
         print(f"  Group {i}: lr={group['lr']:.2e}, params={param_count}, total={total_params:,}")
-        
-        # 检查是否有 token_gate_matrix 参数
-        for p in group['params']:
-            for name, param in model.named_parameters():
-                if param is p and "token_gate" in name:
-                    print(f"    ✓ 包含 token_gate_matrix (lr={group['lr']:.2e})")
-    
+
     print("=" * 60 + "\n")
     # ============ 调试结束 ============
     
@@ -214,10 +198,10 @@ if __name__ == "__main__":
     parser.add_argument("--lr_residual_gate", type=float, default=1e-4)
     parser.add_argument("--lr_residual_Lambda", type=float, default=1e-3)
 
-    # 新增: 隐状态变换头的学习率
-    parser.add_argument("--lr_residual_head", type=float, default=1e-4)  
-    # 新增: Token 门控矩阵的学习率 (提高以克服bfloat16精度问题)
-    parser.add_argument("--lr_token_gate_matrix", type=float, default=1e-2)  
+    parser.add_argument("--lr_residual_head", type=float, default=1e-4)
+    parser.add_argument("--lr_token_gate_matrix", type=float, default=1e-2)
+    # 连续路径 QKV 投影矩阵的学习率
+    parser.add_argument("--lr_z_proj", type=float, default=1e-4)
     
     parser.add_argument("--weight_decay", type=float, default=0.1)
     parser.add_argument("--warmup_ratio", type=float, default=0.1)

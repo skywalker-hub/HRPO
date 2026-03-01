@@ -404,6 +404,13 @@ def LlamaAttention_fast_forward(
     assert(n_kv_heads * n_groups == n_heads)
 
     Q, K, V = self.apply_qkv(self, hidden_states)
+    # 连续路径 QKV 增量融合（仅第一层通过属性传入非 None 值）
+    z_q_delta = getattr(self, '_z_q_delta', None)
+    z_k_delta = getattr(self, '_z_k_delta', None)
+    z_v_delta = getattr(self, '_z_v_delta', None)
+    if z_q_delta is not None: Q = Q + z_q_delta
+    if z_k_delta is not None: K = K + z_k_delta
+    if z_v_delta is not None: V = V + z_v_delta
     Q = Q.view(bsz, q_len, n_heads,    head_dim).transpose(1, 2)
     K = K.view(bsz, q_len, n_kv_heads, head_dim).transpose(1, 2)
     V = V.view(bsz, q_len, n_kv_heads, head_dim).transpose(1, 2)
@@ -673,18 +680,26 @@ def LlamaModel_fast_forward(
         inputs_embeds = self.embed_tokens(input_ids)
 
     thinking_mask = kwargs.get('thinking_mask')
+    # # -------- 旧方案: embedding 层 thinking_residual 融合 (已注释) --------
+    # if thinking_mask is not None:
+    #     new_inputs_embeds = inputs_embeds.clone()
+    #     ########训练断点：回放时HRPO执行处
+    #     masked_input_ids = input_ids[thinking_mask] if input_ids is not None else None
+    #     saved_last_hs = kwargs.get('saved_last_hs')
+    #     masked_last_hs = saved_last_hs[thinking_mask] if saved_last_hs is not None else None
+    #     new_inputs_embeds[thinking_mask] = self.thinking_residual(
+    #         inputs_embeds[thinking_mask], thinking_embeds[thinking_mask],
+    #         input_ids=masked_input_ids,
+    #         last_hs=masked_last_hs,
+    #     )[0].to(inputs_embeds.dtype)
+    #     inputs_embeds = new_inputs_embeds
+    # # -------- 旧方案结束 --------
+
+    # 准备连续路径表示 Z_train，用于第一层 QKV 独立投影融合
+    Z_train = None
     if thinking_mask is not None:
-        new_inputs_embeds = inputs_embeds.clone()
-        ########训练断点：回放时HRPO执行处
-        masked_input_ids = input_ids[thinking_mask] if input_ids is not None else None
-        saved_last_hs = kwargs.get('saved_last_hs')
-        masked_last_hs = saved_last_hs[thinking_mask] if saved_last_hs is not None else None
-        new_inputs_embeds[thinking_mask] = self.thinking_residual(
-            inputs_embeds[thinking_mask], thinking_embeds[thinking_mask],
-            input_ids=masked_input_ids,
-            last_hs=masked_last_hs,
-        )[0].to(inputs_embeds.dtype)
-        inputs_embeds = new_inputs_embeds
+        Z_train = torch.zeros_like(inputs_embeds)
+        Z_train[thinking_mask] = thinking_embeds[thinking_mask].to(inputs_embeds.dtype)
 
     inputs_embeds = inputs_embeds.to(_get_dtype(self.config.torch_dtype))
 
@@ -863,6 +878,13 @@ def LlamaModel_fast_forward(
     else:
         position_embeddings = None
 
+    # 第一层 QKV 融合：计算连续路径投影增量，存储到第一层 self_attn 属性上
+    if Z_train is not None:
+        Z_train = Z_train.to(hidden_states.dtype)
+        self.layers[0].self_attn._z_q_delta = self.z_q_proj(Z_train)
+        self.layers[0].self_attn._z_k_delta = self.z_k_proj(Z_train)
+        self.layers[0].self_attn._z_v_delta = self.z_v_proj(Z_train)
+
     # Go through every layer!
     for idx, decoder_layer in enumerate(self.layers):
 
@@ -912,6 +934,12 @@ def LlamaModel_fast_forward(
         if use_cache: next_decoder_cache += (layer_outputs[2 if output_attentions else 1],)
         if output_attentions: all_self_attns += (layer_outputs[1],)
     pass
+
+    # 清理第一层 self_attn 上的临时 Z delta 属性
+    if hasattr(self.layers[0].self_attn, '_z_q_delta'):
+        del self.layers[0].self_attn._z_q_delta
+        del self.layers[0].self_attn._z_k_delta
+        del self.layers[0].self_attn._z_v_delta
 
     # Final layernorm
     if use_cache:
@@ -963,8 +991,23 @@ def LlamaModel_fast_forward_inference(
     last_thinking_states = kwargs.get('last_thinking_states')
     last_hs = kwargs.get('last_hs')
 
+    # # -------- 旧方案: embedding 层 thinking_residual 融合 (已注释) --------
+    # if is_thinking is not None and last_thinking_states is not None:
+    #     thinking_embeds = last_thinking_states
+    #     ##############主断点11：HRPO实际调用处
+    #     X_hat, a_t = self.model.thinking_residual(
+    #         X, last_thinking_states.unsqueeze(1),
+    #         input_ids=input_ids,
+    #         last_hs=last_hs.unsqueeze(1) if last_hs is not None else None,
+    #     )
+    #     embeds_ratio = a_t.mean(-1).view(-1)
+    #     embeds_ratio[~torch.tensor(is_thinking)] = 1.
+    #     a_t_vector = a_t.squeeze(1)
+    #     a_t_vector[~torch.tensor(is_thinking)] = 1.0
+    #     X[is_thinking] = X_hat[is_thinking].to(X.dtype)
+    # # -------- 旧方案结束 --------
+
     # 准备连续路径表示 Z，用于第一层 QKV 独立投影融合
-    # 不再在 embedding 层通过 thinking_residual 融合，改为在第一层注意力的投影空间内融合
     Z = None
     thinking_embeds = None
     embeds_ratio = None
@@ -2350,6 +2393,11 @@ class FastLlamaModel:
                 if modules_to_save is None: modules_to_save = [module]
                 else: modules_to_save = list(set(modules_to_save).add(module))
 
+            elif module in ("z_q_proj", "z_k_proj", "z_v_proj"):
+                train_thinking_residual = True
+                if modules_to_save is None: modules_to_save = [module]
+                else: modules_to_save.append(module)
+
             else:
                 try:
                     assert(module in accepted_modules)
@@ -2402,10 +2450,12 @@ class FastLlamaModel:
                     train_embed_tokens = True
                 elif "thinking_residual" in module or "token_gate_matrix" in module:
                     train_thinking_residual = True
+                elif module in ("z_q_proj", "z_k_proj", "z_v_proj"):
+                    train_thinking_residual = True
                 else:
                     raise TypeError(
                         f"Unsloth: Module = {module} is not allowed. Only 'lm_head', 'embed_tokens', "
-                        "'thinking_residual' and 'token_gate_matrix' components are allowed."
+                        "'thinking_residual', 'token_gate_matrix' and 'z_*_proj' components are allowed."
                     )
             pass
         pass
@@ -2547,6 +2597,22 @@ class FastLlamaModel:
                     model.model.model.token_gate_matrix.modules_to_save.default\
                         .to(device = "cuda", dtype = new_dtype, non_blocking = True)
                     model.model.model.token_gate_matrix.modules_to_save.default.requires_grad_(True)
+                # 连续路径 QKV 投影矩阵激活
+                if module == "z_q_proj":
+                    assert(hasattr(model.model.model.z_q_proj, "modules_to_save"))
+                    model.model.model.z_q_proj.modules_to_save.default\
+                        .to(device = "cuda", dtype = new_dtype, non_blocking = True)
+                    model.model.model.z_q_proj.modules_to_save.default.requires_grad_(True)
+                if module == "z_k_proj":
+                    assert(hasattr(model.model.model.z_k_proj, "modules_to_save"))
+                    model.model.model.z_k_proj.modules_to_save.default\
+                        .to(device = "cuda", dtype = new_dtype, non_blocking = True)
+                    model.model.model.z_k_proj.modules_to_save.default.requires_grad_(True)
+                if module == "z_v_proj":
+                    assert(hasattr(model.model.model.z_v_proj, "modules_to_save"))
+                    model.model.model.z_v_proj.modules_to_save.default\
+                        .to(device = "cuda", dtype = new_dtype, non_blocking = True)
+                    model.model.model.z_v_proj.modules_to_save.default.requires_grad_(True)
 
         # Patch tokenizer to pad to the right
         internal_model = model
