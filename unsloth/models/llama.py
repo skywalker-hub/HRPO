@@ -1059,10 +1059,11 @@ def LlamaModel_fast_forward_inference(
         )
 
         # 第一层：计算连续路径 Z 的独立 QKV 投影增量
+        # 注意：z_*_proj 是 modules_to_save 包装，不能用 fast_linear_forward（仅适用于 LoRA 层）
         if idx == 0 and Z is not None:
-            z_q_delta = fast_linear_forward(self.model.z_q_proj, Z)
-            z_k_delta = fast_linear_forward(self.model.z_k_proj, Z)
-            z_v_delta = fast_linear_forward(self.model.z_v_proj, Z)
+            z_q_delta = self.model.z_q_proj(Z)
+            z_k_delta = self.model.z_k_proj(Z)
+            z_v_delta = self.model.z_v_proj(Z)
         else:
             z_q_delta = z_k_delta = z_v_delta = None
 
