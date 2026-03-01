@@ -20,7 +20,7 @@ def preprocess_gsm8k(split="train", chunk_size=1000) -> Dataset:
 
 
 def main(args):
-    exp_name = (f"./experiments/{args.model_name.split('/')[-1]}-gsm8k-group{args.group_size}"
+    exp_name = (f"./base-hrpo/{args.model_name.split('/')[-1]}-gsm8k-group{args.group_size}"
                 f"-lora{args.lora_rank}-rmin{args.residual_r_min}-temp{args.temperature}")
     if os.path.exists(exp_name) and len(os.listdir(exp_name)) > 0:
         print(f"Experiment {exp_name} already exists. Exiting...")
@@ -109,7 +109,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--lr", type=float, default=5e-6)
     parser.add_argument("--beta", type=float, default=0.005)
-    parser.add_argument("--residual_r_min", type=float, default=0.95)
+    parser.add_argument("--residual_r_min", type=float, default=0.981)
     parser.add_argument("--residual_r_max", type=float, default=0.999)
     parser.add_argument("--lr_residual_gate", type=float, default=1e-4)
     parser.add_argument("--lr_residual_Lambda", type=float, default=1e-3)
