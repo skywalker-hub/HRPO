@@ -878,12 +878,18 @@ def LlamaModel_fast_forward(
     else:
         position_embeddings = None
 
+    # 清理上一次 forward 残留的 z delta 属性（防止参考前向误用旧值）
+    # 此处清理是安全的：上一步的 loss.backward() 已在此 forward 之前完成
+    _attn0 = self.layers[0].self_attn
+    for _attr in ('_z_q_delta', '_z_k_delta', '_z_v_delta'):
+        if hasattr(_attn0, _attr): delattr(_attn0, _attr)
+
     # 第一层 QKV 融合：计算连续路径投影增量，存储到第一层 self_attn 属性上
     if Z_train is not None:
         Z_train = Z_train.to(hidden_states.dtype)
-        self.layers[0].self_attn._z_q_delta = self.z_q_proj(Z_train)
-        self.layers[0].self_attn._z_k_delta = self.z_k_proj(Z_train)
-        self.layers[0].self_attn._z_v_delta = self.z_v_proj(Z_train)
+        _attn0._z_q_delta = self.z_q_proj(Z_train)
+        _attn0._z_k_delta = self.z_k_proj(Z_train)
+        _attn0._z_v_delta = self.z_v_proj(Z_train)
 
     # Go through every layer!
     for idx, decoder_layer in enumerate(self.layers):
@@ -935,11 +941,11 @@ def LlamaModel_fast_forward(
         if output_attentions: all_self_attns += (layer_outputs[1],)
     pass
 
-    # 清理第一层 self_attn 上的临时 Z delta 属性
-    if hasattr(self.layers[0].self_attn, '_z_q_delta'):
-        del self.layers[0].self_attn._z_q_delta
-        del self.layers[0].self_attn._z_k_delta
-        del self.layers[0].self_attn._z_v_delta
+    # 注意：不能在此处删除 _z_q_delta / _z_k_delta / _z_v_delta 属性！
+    # gradient checkpointing (use_reentrant=True) 在反向传播时会重新执行 layer 0
+    # 的前向计算来重建计算图。如果此时属性已被删除，getattr 返回 None，
+    # delta 不会被加到 Q/K/V 上，梯度就无法回传到 z_*_proj。
+    # 这些属性会在下一次 forward 调用时被自然覆盖，不会导致内存泄漏。
 
     # Final layernorm
     if use_cache:
