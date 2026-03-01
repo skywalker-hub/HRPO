@@ -92,7 +92,7 @@ def main(args):
         else:
             nn.init.zeros_(proj_module.weight)
 
-    exp_name = (f"./test301.2/{args.model_name.split('/')[-1]}-gsm8k-group{args.group_size}"
+    exp_name = (f"./test301.3/{args.model_name.split('/')[-1]}-gsm8k-group{args.group_size}"
                 f"-lora{args.lora_rank}-lr{args.lr_z_proj}"
                 f"-temp{args.temperature}")
     if os.path.exists(exp_name) and len(os.listdir(exp_name)) > 0:
