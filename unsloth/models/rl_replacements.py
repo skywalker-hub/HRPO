@@ -505,8 +505,12 @@ def grpo_trainer_compute_loss(function_name, function):
 
         embeds_ratio = inputs["embeds_ratio"]
         embeds_ratio_mask = embeds_ratio < 1.
-        mean_embeds_ratio = embeds_ratio[embeds_ratio_mask].mean()
-        mean_hidden_ratio = torch.sqrt(1 - embeds_ratio[embeds_ratio_mask] ** 2).mean()
+        if embeds_ratio_mask.any():
+            mean_embeds_ratio = embeds_ratio[embeds_ratio_mask].mean()
+            mean_hidden_ratio = torch.sqrt(1 - embeds_ratio[embeds_ratio_mask] ** 2).mean()
+        else:
+            mean_embeds_ratio = torch.tensor(1.0, device=embeds_ratio.device)
+            mean_hidden_ratio = torch.tensor(0.0, device=embeds_ratio.device)
 
         # 获取 thinking_residual_head 的统计信息
         new_head_norm = 0.0
