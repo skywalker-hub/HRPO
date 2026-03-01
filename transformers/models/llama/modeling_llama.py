@@ -550,8 +550,20 @@ class LlamaModel(LlamaPreTrainedModel):
         # 真正的初始化在训练脚本 (hrpo_gsm8k.py) 中对 modules_to_save.default.weight 进行
         self.token_gate_matrix = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=self.padding_idx)
 
+        # 连续路径独立 QKV 投影矩阵，仅在第一层注意力中使用
+        # 将连续潜在表示 Z 投影到与离散路径独立的 QKV 子空间
+        head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
+        self.z_q_proj = nn.Linear(config.hidden_size, config.num_attention_heads * head_dim, bias=False)
+        self.z_k_proj = nn.Linear(config.hidden_size, config.num_key_value_heads * head_dim, bias=False)
+        self.z_v_proj = nn.Linear(config.hidden_size, config.num_key_value_heads * head_dim, bias=False)
+
         # Initialize weights and apply final processing
         self.post_init()
+
+        # 零初始化连续路径投影矩阵，确保训练初期行为与原始模型一致
+        nn.init.zeros_(self.z_q_proj.weight)
+        nn.init.zeros_(self.z_k_proj.weight)
+        nn.init.zeros_(self.z_v_proj.weight)
 
     def get_input_embeddings(self):
         return self.embed_tokens

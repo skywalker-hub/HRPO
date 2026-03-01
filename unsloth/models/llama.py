@@ -129,6 +129,9 @@ def LlamaAttention_fast_forward_inference(
     position_ids,
     do_prefill = False,
     attention_mask = None,
+    z_q_delta = None,  # 连续路径 Q 投影增量，仅第一层传入
+    z_k_delta = None,  # 连续路径 K 投影增量，仅第一层传入
+    z_v_delta = None,  # 连续路径 V 投影增量，仅第一层传入
 ):
     """
         https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/modeling_llama.py#L406
@@ -207,6 +210,12 @@ def LlamaAttention_fast_forward_inference(
     Qn = fast_linear_forward(self.q_proj, Xn, out = self.temp_QA[0])
     Kn = fast_linear_forward(self.k_proj, Xn, out = self.temp_KV[0])
     Vn = fast_linear_forward(self.v_proj, Xn, out = self.temp_KV[1])
+    
+    # test0121.1
+    # 连续路径 QKV 增量融合：Q = X·W_q + Z·W_q^z（仅第一层传入非 None 值）
+    if z_q_delta is not None: Qn += z_q_delta
+    if z_k_delta is not None: Kn += z_k_delta
+    if z_v_delta is not None: Vn += z_v_delta
     Qn = Qn.view(bsz, 1, n_heads,    head_dim).transpose(1, 2)
     Kn = Kn.view(bsz, 1, n_kv_heads, head_dim).transpose(1, 2)
     Vn = Vn.view(bsz, 1, n_kv_heads, head_dim).transpose(1, 2)
@@ -950,26 +959,24 @@ def LlamaModel_fast_forward_inference(
 
     is_thinking = kwargs.get('is_thinking')
 
-    #####last_thinking_states（上一时刻的隐状态）在此时被接收和处理
+    #####last_thinking_states（上一时刻的隐状态）在此时被接收
     last_thinking_states = kwargs.get('last_thinking_states')
     last_hs = kwargs.get('last_hs')
+
+    # 准备连续路径表示 Z，用于第一层 QKV 独立投影融合
+    # 不再在 embedding 层通过 thinking_residual 融合，改为在第一层注意力的投影空间内融合
+    Z = None
+    thinking_embeds = None
+    embeds_ratio = None
+    a_t_vector = None
     if is_thinking is not None and last_thinking_states is not None:
         thinking_embeds = last_thinking_states
-
-        ##############主断点11：HRPO实际调用处
-        ##############上一时刻的隐状态和embedd在这里送往HRPO进行计算得出混合向量，再送入attention计算
-        # 传入 input_ids 用于查询 token 门控矩阵
-        X_hat, a_t = self.model.thinking_residual(
-            X, last_thinking_states.unsqueeze(1),
-            input_ids=input_ids,
-            last_hs=last_hs.unsqueeze(1) if last_hs is not None else None,
-        )
-
-        embeds_ratio = a_t.mean(-1).view(-1)  # 用 view(-1) 替代 squeeze()，避免 bsz=1 时变成 0 维标量
-        embeds_ratio[~torch.tensor(is_thinking)] = 1.
-        a_t_vector = a_t.squeeze(1)  # (batch, hidden_size) — 保留逐维度的完整向量
-        a_t_vector[~torch.tensor(is_thinking)] = 1.0
-        X[is_thinking] = X_hat[is_thinking].to(X.dtype)
+        Z = last_thinking_states.unsqueeze(1).to(X.dtype)  # [bsz, 1, hidden_size]
+        thinking_mask_tensor = torch.tensor(is_thinking, device=Z.device)
+        Z[~thinking_mask_tensor] = 0.0  # 非思考位置的 Z 置零，不参与连续路径投影
+        # 兼容下游返回值（不再有 a_t，用常量 1.0 替代）
+        embeds_ratio = torch.ones(bsz, device=X.device, dtype=torch.float32)
+        a_t_vector = torch.ones(bsz, hd, device=X.device, dtype=X.dtype)
 
 
     bsz, q_len, hd = X.shape
@@ -1007,6 +1014,15 @@ def LlamaModel_fast_forward_inference(
             XX2 = XX2,
             variance = variance,
         )
+
+        # 第一层：计算连续路径 Z 的独立 QKV 投影增量
+        if idx == 0 and Z is not None:
+            z_q_delta = fast_linear_forward(self.model.z_q_proj, Z)
+            z_k_delta = fast_linear_forward(self.model.z_k_proj, Z)
+            z_v_delta = fast_linear_forward(self.model.z_v_proj, Z)
+        else:
+            z_q_delta = z_k_delta = z_v_delta = None
+
         X, present_key_value = LlamaAttention_fast_forward_inference(
             decoder_layer.self_attn,
             hidden_states = X,
@@ -1014,6 +1030,9 @@ def LlamaModel_fast_forward_inference(
             position_ids = position_ids,
             attention_mask = attention_mask,
             do_prefill = not hasattr(decoder_layer.self_attn, "paged_attention"),
+            z_q_delta = z_q_delta,
+            z_k_delta = z_k_delta,
+            z_v_delta = z_v_delta,
         )
         X += residual
 
