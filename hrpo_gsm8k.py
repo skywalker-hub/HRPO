@@ -156,7 +156,7 @@ def main(args):
         args.lr_residual_Lambda,
         args.lr_residual_head,
         args.lr_token_gate_matrix,
-        lr_z_proj = args.lr,  # 连续路径 QKV 投影矩阵的学习率，与主 attention 模块一致
+        lr_z_proj = args.lr_z_proj,  # 连续路径 QKV 投影矩阵的学习率，与主 attention 模块一致
     )
     
     # ============ 调试：检查 z_*_proj 是否被正确加入优化器 ============
