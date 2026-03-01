@@ -527,6 +527,11 @@ def grpo_trainer_compute_loss(function_name, function):
         discrete_norm = 0.0
         continuous_norm = 0.0
         thinking_norm_ratio = 0.0
+        # 连续路径 QKV 投影矩阵监控
+        z_q_weight_norm = 0.0; z_k_weight_norm = 0.0; z_v_weight_norm = 0.0
+        z_q_grad_norm  = 0.0; z_k_grad_norm  = 0.0; z_v_grad_norm  = 0.0
+        z_q_weight_absmax = 0.0; z_k_weight_absmax = 0.0; z_v_weight_absmax = 0.0
+        z_q_weight_mean = 0.0; z_k_weight_mean = 0.0; z_v_weight_mean = 0.0
         try:
             base_model = self.model
             while hasattr(base_model, 'model'):
@@ -585,6 +590,22 @@ def grpo_trainer_compute_loss(function_name, function):
             discrete_norm = getattr(base_model, '_discrete_norm', 0.0)
             continuous_norm = getattr(base_model, '_continuous_norm', 0.0)
             thinking_norm_ratio = getattr(base_model, '_thinking_norm_ratio', 0.0)
+            # 记录连续路径 z_q/k/v_proj 的权重与梯度信息
+            def _z_proj_stats(module):
+                w = (
+                    module.modules_to_save.default.weight
+                    if hasattr(module, "modules_to_save")
+                    else module.weight
+                )
+                wd = w.data.float()
+                g_norm = w.grad.float().norm().item() if w.grad is not None else 0.0
+                return wd.norm().item(), g_norm, wd.abs().max().item(), wd.mean().item()
+            if hasattr(base_model, 'z_q_proj'):
+                z_q_weight_norm, z_q_grad_norm, z_q_weight_absmax, z_q_weight_mean = _z_proj_stats(base_model.z_q_proj)
+            if hasattr(base_model, 'z_k_proj'):
+                z_k_weight_norm, z_k_grad_norm, z_k_weight_absmax, z_k_weight_mean = _z_proj_stats(base_model.z_k_proj)
+            if hasattr(base_model, 'z_v_proj'):
+                z_v_weight_norm, z_v_grad_norm, z_v_weight_absmax, z_v_weight_mean = _z_proj_stats(base_model.z_v_proj)
         except:
             pass
 
@@ -609,6 +630,19 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics[mode]["discrete_norm"].append(discrete_norm)
             self._metrics[mode]["continuous_norm"].append(continuous_norm)
             self._metrics[mode]["thinking_norm_ratio"].append(thinking_norm_ratio)
+            # 连续路径 z_q/k/v_proj 指标
+            self._metrics[mode]["z_q_weight_norm"].append(z_q_weight_norm)
+            self._metrics[mode]["z_k_weight_norm"].append(z_k_weight_norm)
+            self._metrics[mode]["z_v_weight_norm"].append(z_v_weight_norm)
+            self._metrics[mode]["z_q_grad_norm"].append(z_q_grad_norm)
+            self._metrics[mode]["z_k_grad_norm"].append(z_k_grad_norm)
+            self._metrics[mode]["z_v_grad_norm"].append(z_v_grad_norm)
+            self._metrics[mode]["z_q_weight_absmax"].append(z_q_weight_absmax)
+            self._metrics[mode]["z_k_weight_absmax"].append(z_k_weight_absmax)
+            self._metrics[mode]["z_v_weight_absmax"].append(z_v_weight_absmax)
+            self._metrics[mode]["z_q_weight_mean"].append(z_q_weight_mean)
+            self._metrics[mode]["z_k_weight_mean"].append(z_k_weight_mean)
+            self._metrics[mode]["z_v_weight_mean"].append(z_v_weight_mean)
         else:
             self._metrics["embeds_ratio"].append(mean_embeds_ratio.item())
             self._metrics["hidden_ratio"].append(mean_hidden_ratio.item())
@@ -629,6 +663,19 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics["discrete_norm"].append(discrete_norm)
             self._metrics["continuous_norm"].append(continuous_norm)
             self._metrics["thinking_norm_ratio"].append(thinking_norm_ratio)
+            # 连续路径 z_q/k/v_proj 指标
+            self._metrics["z_q_weight_norm"].append(z_q_weight_norm)
+            self._metrics["z_k_weight_norm"].append(z_k_weight_norm)
+            self._metrics["z_v_weight_norm"].append(z_v_weight_norm)
+            self._metrics["z_q_grad_norm"].append(z_q_grad_norm)
+            self._metrics["z_k_grad_norm"].append(z_k_grad_norm)
+            self._metrics["z_v_grad_norm"].append(z_v_grad_norm)
+            self._metrics["z_q_weight_absmax"].append(z_q_weight_absmax)
+            self._metrics["z_k_weight_absmax"].append(z_k_weight_absmax)
+            self._metrics["z_v_weight_absmax"].append(z_v_weight_absmax)
+            self._metrics["z_q_weight_mean"].append(z_q_weight_mean)
+            self._metrics["z_k_weight_mean"].append(z_k_weight_mean)
+            self._metrics["z_v_weight_mean"].append(z_v_weight_mean)
         return loss
     pass
 
