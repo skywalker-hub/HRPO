@@ -532,6 +532,8 @@ def grpo_trainer_compute_loss(function_name, function):
         z_q_grad_norm  = 0.0; z_k_grad_norm  = 0.0; z_v_grad_norm  = 0.0
         z_q_weight_absmax = 0.0; z_k_weight_absmax = 0.0; z_v_weight_absmax = 0.0
         z_q_weight_mean = 0.0; z_k_weight_mean = 0.0; z_v_weight_mean = 0.0
+        # 新旧 QKV 模值比例 rho = ||z_delta||_F / (||Q_e||_F + eps)
+        rho_q = 0.0; rho_k = 0.0; rho_v = 0.0
         try:
             base_model = self.model
             while hasattr(base_model, 'model'):
@@ -606,6 +608,10 @@ def grpo_trainer_compute_loss(function_name, function):
                 z_k_weight_norm, z_k_grad_norm, z_k_weight_absmax, z_k_weight_mean = _z_proj_stats(base_model.z_k_proj)
             if hasattr(base_model, 'z_v_proj'):
                 z_v_weight_norm, z_v_grad_norm, z_v_weight_absmax, z_v_weight_mean = _z_proj_stats(base_model.z_v_proj)
+            # 读取新旧 QKV 模值比例
+            rho_q = getattr(base_model, '_rho_q', 0.0)
+            rho_k = getattr(base_model, '_rho_k', 0.0)
+            rho_v = getattr(base_model, '_rho_v', 0.0)
         except:
             pass
 
@@ -643,6 +649,10 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics[mode]["z_q_weight_mean"].append(z_q_weight_mean)
             self._metrics[mode]["z_k_weight_mean"].append(z_k_weight_mean)
             self._metrics[mode]["z_v_weight_mean"].append(z_v_weight_mean)
+            # 新旧 QKV 模值比例
+            self._metrics[mode]["rho_q"].append(rho_q)
+            self._metrics[mode]["rho_k"].append(rho_k)
+            self._metrics[mode]["rho_v"].append(rho_v)
         else:
             self._metrics["embeds_ratio"].append(mean_embeds_ratio.item())
             self._metrics["hidden_ratio"].append(mean_hidden_ratio.item())
@@ -676,6 +686,10 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics["z_q_weight_mean"].append(z_q_weight_mean)
             self._metrics["z_k_weight_mean"].append(z_k_weight_mean)
             self._metrics["z_v_weight_mean"].append(z_v_weight_mean)
+            # 新旧 QKV 模值比例
+            self._metrics["rho_q"].append(rho_q)
+            self._metrics["rho_k"].append(rho_k)
+            self._metrics["rho_v"].append(rho_v)
         return loss
     pass
 

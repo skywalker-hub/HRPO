@@ -211,11 +211,17 @@ def LlamaAttention_fast_forward_inference(
     Kn = fast_linear_forward(self.k_proj, Xn, out = self.temp_KV[0])
     Vn = fast_linear_forward(self.v_proj, Xn, out = self.temp_KV[1])
     
-    # test0121.1
     # 连续路径 QKV 增量融合：Q = X·W_q + Z·W_q^z（仅第一层传入非 None 值）
-    if z_q_delta is not None: Qn += z_q_delta
-    if z_k_delta is not None: Kn += z_k_delta
-    if z_v_delta is not None: Vn += z_v_delta
+    if z_q_delta is not None:
+        # 计算新旧 QKV 模值比例 rho = ||z_delta||_F / (||Q_e||_F + eps)
+        with torch.no_grad():
+            _eps = 1e-8
+            self._rho_q = (z_q_delta.norm() / (Qn.norm() + _eps)).item()
+            self._rho_k = (z_k_delta.norm() / (Kn.norm() + _eps)).item()
+            self._rho_v = (z_v_delta.norm() / (Vn.norm() + _eps)).item()
+        Qn += z_q_delta
+        Kn += z_k_delta
+        Vn += z_v_delta
     Qn = Qn.view(bsz, 1, n_heads,    head_dim).transpose(1, 2)
     Kn = Kn.view(bsz, 1, n_kv_heads, head_dim).transpose(1, 2)
     Vn = Vn.view(bsz, 1, n_kv_heads, head_dim).transpose(1, 2)
@@ -408,9 +414,16 @@ def LlamaAttention_fast_forward(
     z_q_delta = getattr(self, '_z_q_delta', None)
     z_k_delta = getattr(self, '_z_k_delta', None)
     z_v_delta = getattr(self, '_z_v_delta', None)
-    if z_q_delta is not None: Q = Q + z_q_delta
-    if z_k_delta is not None: K = K + z_k_delta
-    if z_v_delta is not None: V = V + z_v_delta
+    if z_q_delta is not None:
+        # 计算新旧 QKV 模值比例 rho = ||z_delta||_F / (||Q_e||_F + eps)
+        with torch.no_grad():
+            _eps = 1e-8
+            self._rho_q = (z_q_delta.norm() / (Q.norm() + _eps)).item()
+            self._rho_k = (z_k_delta.norm() / (K.norm() + _eps)).item()
+            self._rho_v = (z_v_delta.norm() / (V.norm() + _eps)).item()
+        Q = Q + z_q_delta
+        K = K + z_k_delta
+        V = V + z_v_delta
     Q = Q.view(bsz, q_len, n_heads,    head_dim).transpose(1, 2)
     K = K.view(bsz, q_len, n_kv_heads, head_dim).transpose(1, 2)
     V = V.view(bsz, q_len, n_kv_heads, head_dim).transpose(1, 2)
@@ -947,6 +960,12 @@ def LlamaModel_fast_forward(
     # delta 不会被加到 Q/K/V 上，梯度就无法回传到 z_*_proj。
     # 这些属性会在下一次 forward 调用时被自然覆盖，不会导致内存泄漏。
 
+    # 将 layer 0 self_attn 上的 rho 监控值拷贝到模型层，供 W&B 记录
+    _attn0_train = self.layers[0].self_attn
+    self._rho_q = getattr(_attn0_train, '_rho_q', 0.0)
+    self._rho_k = getattr(_attn0_train, '_rho_k', 0.0)
+    self._rho_v = getattr(_attn0_train, '_rho_v', 0.0)
+
     # Final layernorm
     if use_cache:
         hidden_states = \
@@ -1104,6 +1123,12 @@ def LlamaModel_fast_forward_inference(
 
         next_decoder_cache.append(present_key_value)
     pass
+
+    # 将 layer 0 self_attn 上的 rho 监控值拷贝到模型层，供 W&B 记录
+    _attn0_inf = self.model.layers[0].self_attn
+    self.model._rho_q = getattr(_attn0_inf, '_rho_q', 0.0)
+    self.model._rho_k = getattr(_attn0_inf, '_rho_k', 0.0)
+    self.model._rho_v = getattr(_attn0_inf, '_rho_v', 0.0)
 
     ##############主断点12：前向循环完成处
     ##############X 是经过了全部 N 层 decoder layer 处理后的隐藏状态，形状为 [bsz, 1, hidden_dim]
