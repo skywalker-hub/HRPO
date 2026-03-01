@@ -1034,20 +1034,20 @@ def LlamaModel_fast_forward_inference(
     #     X[is_thinking] = X_hat[is_thinking].to(X.dtype)
     # # -------- 旧方案结束 --------
 
-    # 准备连续路径表示 Z，用于第一层 QKV 独立投影融合
-    # 使用上一时刻的隐状态 last_hs 作为连续路径输入（而非 last_thinking_states）
+    # thinking_embeds 的赋值与 Z 的来源分开处理
     Z = None
     thinking_embeds = None
     embeds_ratio = None
     a_t_vector = None
-    if is_thinking is not None and last_hs is not None:
+    if is_thinking is not None and last_thinking_states is not None:
         thinking_embeds = last_thinking_states
+        embeds_ratio = torch.ones(bsz, device=X.device, dtype=torch.float32)
+        a_t_vector = torch.ones(bsz, hd, device=X.device, dtype=X.dtype)
+    # 连续路径 Z 使用上一时刻的隐状态 last_hs（而非 last_thinking_states）
+    if is_thinking is not None and last_hs is not None:
         Z = last_hs.unsqueeze(1).to(X.dtype)  # [bsz, 1, hidden_size]
         thinking_mask_tensor = torch.tensor(is_thinking, device=Z.device)
         Z[~thinking_mask_tensor] = 0.0  # 非思考位置的 Z 置零，不参与连续路径投影
-        # 兼容下游返回值（不再有 a_t，用常量 1.0 替代）
-        embeds_ratio = torch.ones(bsz, device=X.device, dtype=torch.float32)
-        a_t_vector = torch.ones(bsz, hd, device=X.device, dtype=X.dtype)
 
 
     bsz, q_len, hd = X.shape
