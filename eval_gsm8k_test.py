@@ -234,7 +234,7 @@ if __name__ == "__main__":
     # 直接写死为你启动命令中的配置
     greedy = False
     batch_size = 2
-    checkpoint_path = "/root/autodl-tmp/HRPO/test0116.2.0.4/Qwen2.5-1.5B-Instruct-gsm8k-group4-lora32-lr0.01-init-2-rmin0.981-temp0.5/checkpoint-934"
+    checkpoint_path = "/root/autodl-tmp/HRPO/test301.1/Qwen2.5-3B-Instruct-gsm8k-group4-lora32-lr0.01-init-2-rmin0.981-temp0.5/checkpoint-934"
 
     base_model = None
     ### 本地模型路径映射
