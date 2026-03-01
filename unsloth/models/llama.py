@@ -709,10 +709,12 @@ def LlamaModel_fast_forward(
     # # -------- 旧方案结束 --------
 
     # 准备连续路径表示 Z_train，用于第一层 QKV 独立投影融合
+    # 使用上一时刻的隐状态 saved_last_hs 作为连续路径输入（而非 thinking_embeds）
+    saved_last_hs = kwargs.get('saved_last_hs')
     Z_train = None
-    if thinking_mask is not None:
+    if thinking_mask is not None and saved_last_hs is not None:
         Z_train = torch.zeros_like(inputs_embeds)
-        Z_train[thinking_mask] = thinking_embeds[thinking_mask].to(inputs_embeds.dtype)
+        Z_train[thinking_mask] = saved_last_hs[thinking_mask].to(inputs_embeds.dtype)
 
     inputs_embeds = inputs_embeds.to(_get_dtype(self.config.torch_dtype))
 
@@ -1033,13 +1035,14 @@ def LlamaModel_fast_forward_inference(
     # # -------- 旧方案结束 --------
 
     # 准备连续路径表示 Z，用于第一层 QKV 独立投影融合
+    # 使用上一时刻的隐状态 last_hs 作为连续路径输入（而非 last_thinking_states）
     Z = None
     thinking_embeds = None
     embeds_ratio = None
     a_t_vector = None
-    if is_thinking is not None and last_thinking_states is not None:
+    if is_thinking is not None and last_hs is not None:
         thinking_embeds = last_thinking_states
-        Z = last_thinking_states.unsqueeze(1).to(X.dtype)  # [bsz, 1, hidden_size]
+        Z = last_hs.unsqueeze(1).to(X.dtype)  # [bsz, 1, hidden_size]
         thinking_mask_tensor = torch.tensor(is_thinking, device=Z.device)
         Z[~thinking_mask_tensor] = 0.0  # 非思考位置的 Z 置零，不参与连续路径投影
         # 兼容下游返回值（不再有 a_t，用常量 1.0 替代）
