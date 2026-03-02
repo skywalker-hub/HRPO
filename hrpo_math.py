@@ -34,12 +34,6 @@ def preprocess_math(split="train", chunk_size=1000, root='../MATH') -> Dataset:
 
 
 def main(args):
-    exp_name = (f"./MATH.experiments/{args.model_name.split('/')[-1]}-math-group{args.group_size}"
-                f"-lora{args.lora_rank}-rmin{args.residual_r_min}-temp{args.temperature}")
-    if os.path.exists(exp_name) and len(os.listdir(exp_name)) > 0:
-        print(f"Experiment {exp_name} already exists. Exiting...")
-        exit()
-
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name = args.model_name,
         max_seq_length = args.max_prompt_length + args.max_completion_length,
@@ -60,39 +54,73 @@ def main(args):
             "gate_proj", "up_proj", "down_proj",
         ],
         modules_to_save = [
-            "thinking_residual_gate_r",
-            "thinking_residual_gate_i",
-            "thinking_residual_Lambda",
-            "thinking_residual_head",
-            "token_gate_matrix",
+            # "thinking_residual_gate_r",
+            # "thinking_residual_gate_i",
+            # "thinking_residual_Lambda",
+            # "thinking_residual_head",
+            # "token_gate_matrix",
+            "z_q_proj",  # 连续路径 Q 投影矩阵
+            "z_k_proj",  # 连续路径 K 投影矩阵
+            "z_v_proj",  # 连续路径 V 投影矩阵
         ], 
         lora_alpha = args.lora_rank * 2,
         use_gradient_checkpointing = "unsloth",
         random_state = args.seed,
     )
-    model.model.model.thinking_residual_Lambda.reset_lambda_parameters(
-        r_min = args.residual_r_min, r_max = args.residual_r_max,
-    )
+    # model.model.model.thinking_residual_Lambda.reset_lambda_parameters(
+    #     r_min = args.residual_r_min, r_max = args.residual_r_max,
+    # )
 
+    # ============ 【真正生效的初始化】 ============
     import torch.nn as nn
 
-    head_module = model.model.model.thinking_residual_head
-    gate_module = model.model.model.token_gate_matrix
+    # # -------- 旧方案: thinking_residual 相关初始化 (已注释) --------
+    # head_module = model.model.model.thinking_residual_head
+    # gate_module = model.model.model.token_gate_matrix
+    #
+    # if hasattr(head_module, 'modules_to_save'):
+    #     head_trainable_weight = head_module.modules_to_save.default.weight
+    # else:
+    #     head_trainable_weight = head_module.weight
+    #
+    # if hasattr(gate_module, 'modules_to_save'):
+    #     gate_trainable_weight = gate_module.modules_to_save.default.weight
+    # else:
+    #     gate_trainable_weight = gate_module.weight
+    #
+    # nn.init.zeros_(head_trainable_weight)
+    # token_gate_init = -2.0
+    # nn.init.constant_(gate_trainable_weight, token_gate_init)
+    # -------- 旧方案结束 --------
 
-    if hasattr(head_module, 'modules_to_save'):
-        head_trainable_weight = head_module.modules_to_save.default.weight
-    else:
-        head_trainable_weight = head_module.weight
+    # -------- 新方案: z_*_proj 零初始化 --------
+    z_proj_names = ["z_q_proj", "z_k_proj", "z_v_proj"]
+    for proj_name in z_proj_names:
+        proj_module = getattr(model.model.model, proj_name)
+        if hasattr(proj_module, 'modules_to_save'):
+            nn.init.zeros_(proj_module.modules_to_save.default.weight)
+        else:
+            nn.init.zeros_(proj_module.weight)
 
-    if hasattr(gate_module, 'modules_to_save'):
-        gate_trainable_weight = gate_module.modules_to_save.default.weight
-    else:
-        gate_trainable_weight = gate_module.weight
+    exp_name = (f"./MATH.experiments/{args.model_name.split('/')[-1]}-math-group{args.group_size}"
+                f"-lora{args.lora_rank}-lr{args.lr_z_proj}-temp{args.temperature}")
+    if os.path.exists(exp_name) and len(os.listdir(exp_name)) > 0:
+        print(f"Experiment {exp_name} already exists. Exiting...")
+        exit()
 
-    nn.init.zeros_(head_trainable_weight)
-
-    token_gate_init = -2.0
-    nn.init.constant_(gate_trainable_weight, token_gate_init)
+    # ============ 打印初始值情况 ============
+    print("\n" + "=" * 60)
+    print("连续路径 QKV 投影矩阵初始值检查")
+    print("=" * 60)
+    for proj_name in z_proj_names:
+        proj_module = getattr(model.model.model, proj_name)
+        w = proj_module.modules_to_save.default.weight.data if hasattr(proj_module, 'modules_to_save') else proj_module.weight.data
+        print(f"\n[{proj_name}]")
+        print(f"  形状: {w.shape}")
+        print(f"  是否全为0: {(w == 0).all().item()}")
+        print(f"  requires_grad: {w.requires_grad}")
+    print("=" * 60 + "\n")
+    # ============ 初始值检查结束 ============
 
     training_args = GRPOConfig(
         use_vllm = False,
@@ -137,7 +165,34 @@ def main(args):
         args.lr_residual_Lambda,
         args.lr_residual_head,
         args.lr_token_gate_matrix,
+        lr_z_proj = args.lr_z_proj,  # 连续路径 QKV 投影矩阵的学习率，与主 attention 模块一致
     )
+
+    # ============ 调试：检查 z_*_proj 是否被正确加入优化器 ============
+    print("\n" + "=" * 60)
+    print("调试：检查参数是否在优化器中")
+    print("=" * 60)
+
+    print("\n【所有包含 'z_q_proj/z_k_proj/z_v_proj' 的参数】")
+    found_z = False
+    for name, param in model.named_parameters():
+        if any(z in name for z in ("z_q_proj", "z_k_proj", "z_v_proj")):
+            found_z = True
+            print(f"  {name}")
+            print(f"    shape: {param.shape}, requires_grad: {param.requires_grad}, dtype: {param.dtype}")
+    if not found_z:
+        print("  WARNING: 没有找到任何 z_*_proj 参数！")
+
+    print("\n【优化器参数组】")
+    trainer.create_optimizer()
+    for i, group in enumerate(trainer.optimizer.param_groups):
+        param_count = len(group['params'])
+        total_params = sum(p.numel() for p in group['params'])
+        print(f"  Group {i}: lr={group['lr']:.2e}, params={param_count}, total={total_params:,}")
+
+    print("=" * 60 + "\n")
+    # ============ 调试结束 ============
+
     trainer.train()
 
 
@@ -153,6 +208,9 @@ if __name__ == "__main__":
     parser.add_argument("--lr_residual_Lambda", type=float, default=1e-3)
     parser.add_argument("--lr_residual_head", type=float, default=1e-4)
     parser.add_argument("--lr_token_gate_matrix", type=float, default=1e-2)
+    # 连续路径 QKV 投影矩阵的学习率
+    parser.add_argument("--lr_z_proj", type=float, default=1e-4)
+
     parser.add_argument("--weight_decay", type=float, default=0.1)
     parser.add_argument("--warmup_ratio", type=float, default=0.1)
     parser.add_argument("--lr_scheduler_type", type=str, default="cosine")
