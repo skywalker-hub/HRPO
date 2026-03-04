@@ -38,6 +38,7 @@ def evaluate_model(
     batch_size: int = 4,
     num_samples: int = None,
     save_results: bool = True,
+    math500_only: bool = False,
 ):
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name = model_path,
@@ -52,8 +53,13 @@ def evaluate_model(
     model.load_adapter(adapter_path)
     model = FastLanguageModel.for_inference(model)
 
-    dataset = preprocess_math('test', chunk_size=500)
     math500 = load_dataset('json', data_files='../MATH-500/test.jsonl', split='train')
+
+    if math500_only:
+        dataset = math500
+        print(f"仅测试 MATH-500 子集")
+    else:
+        dataset = preprocess_math('test', chunk_size=500)
 
     if num_samples and len(dataset) > num_samples:
         dataset = dataset.shuffle(seed=42).select(range(num_samples))
@@ -187,6 +193,7 @@ if __name__ == "__main__":
     parser.add_argument("--greedy", type=bool, default=True)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--checkpoint_path", type=str, default=None)
+    parser.add_argument("--math500_only", action="store_true", help="只测试 MATH-500 子集")
     args = parser.parse_args()
 
     base_model = None
@@ -221,4 +228,5 @@ if __name__ == "__main__":
             batch_size=args.batch_size,
             num_samples=None,
             save_results=True,
+            math500_only=args.math500_only,
         )
