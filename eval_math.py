@@ -53,7 +53,7 @@ def evaluate_model(
     model = FastLanguageModel.for_inference(model)
 
     dataset = preprocess_math('test', chunk_size=500)
-    math500 = load_dataset('HuggingFaceH4/MATH-500')['test']
+    math500 = load_dataset('../MATH-500')['test']
 
     if num_samples and len(dataset) > num_samples:
         dataset = dataset.shuffle(seed=42).select(range(num_samples))
