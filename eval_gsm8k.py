@@ -4,12 +4,21 @@ from unsloth import FastLanguageModel
 import os
 import json
 import torch
+import numpy as np
 from datetime import datetime
 from datasets import load_dataset
 from transformers import GenerationConfig
 from tqdm import tqdm
 
 from utils import *
+
+
+def pass_at_k_estimator(n, c, k):
+    """无偏估计 pass@k (Codex / Chen et al., 2021)
+    n=总采样次数, c=答对次数, k=pass@k的k"""
+    if n - c < k:
+        return 1.0
+    return 1.0 - np.prod(1.0 - k / np.arange(n - c + 1, n + 1))
 
 
 def evaluate_model(
@@ -137,11 +146,31 @@ def evaluate_model(
         progress_bar.update(current_batch_size)
         progress_bar.set_postfix(postfix)
 
+        if n_questions % 32 == 0:
+            correct_counts_so_far = [sum(g['correct'] for g in qr['generations']) for qr in all_question_results]
+            print(f"\n--- [{n_questions}/{total_samples}] avg_len={avg_gen_len:.1f} ---")
+            print(f"{'k':>4} | {'简单统计':>14} | {'无偏估计':>10}")
+            for k in pass_k_list:
+                sp = sum(1 for qr in all_question_results if any(g['correct'] for g in qr['generations'][:k]))
+                ub = np.mean([pass_at_k_estimator(n_generations, c, k) for c in correct_counts_so_far])
+                print(f"{k:>4} | {sp:>5}/{n_questions} = {sp/n_questions*100:>6.2f}% | {ub*100:>6.2f}%")
+
     progress_bar.close()
 
     n_questions = len(all_question_results)
     avg_gen_len = total_gen_tokens / (n_questions * n_generations) if n_questions > 0 else 0
-    print(f"\nFinal average generation length: {avg_gen_len:.1f} tokens")
+
+    # 每题的答对次数
+    correct_counts = [sum(g['correct'] for g in qr['generations']) for qr in all_question_results]
+
+    # ============ 两种统计方式 ============
+    print("\n" + "=" * 70)
+    print(f"  n_generations = {n_generations}, total_questions = {n_questions}")
+    print(f"  avg generation length = {avg_gen_len:.1f} tokens")
+    print("=" * 70)
+
+    print(f"\n{'k':>4} | {'简单统计 (前k中有正确)':>24} | {'无偏估计 (Codex)':>20}")
+    print("-" * 56)
 
     metrics = {
         'n_generations': n_generations,
@@ -151,9 +180,19 @@ def evaluate_model(
         'timestamp': datetime.now().isoformat(),
     }
     for k in pass_k_list:
-        passed = sum(1 for qr in all_question_results if any(g['correct'] for g in qr['generations'][:k]))
-        metrics[f'pass@{k}'] = passed / n_questions
-        print(f"  pass@{k}: {passed}/{n_questions} = {passed/n_questions*100:.2f}%")
+        # 简单统计：前 k 个里有没有答对的
+        simple_passed = sum(1 for qr in all_question_results if any(g['correct'] for g in qr['generations'][:k]))
+        simple_rate = simple_passed / n_questions
+
+        # 无偏估计：用全部 n 次采样中的答对次数 c，估算 pass@k
+        unbiased_rate = np.mean([pass_at_k_estimator(n_generations, c, k) for c in correct_counts])
+
+        metrics[f'pass@{k}_simple'] = simple_rate
+        metrics[f'pass@{k}_unbiased'] = float(unbiased_rate)
+
+        print(f"{k:>4} | {simple_passed:>5}/{n_questions} = {simple_rate*100:>6.2f}%     | {unbiased_rate*100:>6.2f}%")
+
+    print("=" * 70)
 
     if save_results:
         save_path = adapter_path + "/eval_results.json"
