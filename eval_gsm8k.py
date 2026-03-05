@@ -162,7 +162,7 @@ def evaluate_model(
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--greedy", type=bool, default=True)
+    parser.add_argument("--greedy", type=bool, default=False)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--checkpoint_path", type=str, default=None)
     args = parser.parse_args()
