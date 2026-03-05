@@ -142,10 +142,13 @@ def evaluate_model(
 
         n_questions = len(all_question_results)
         avg_gen_len = total_gen_tokens / (n_questions * n_generations) if n_questions > 0 else 0
+        correct_counts_so_far = [sum(g['correct'] for g in qr['generations']) for qr in all_question_results]
         postfix = {'avg_len': f'{avg_gen_len:.1f}'}
         for k in pass_k_list:
-            passed = sum(1 for qr in all_question_results if any(g['correct'] for g in qr['generations'][:k]))
-            postfix[f'pass@{k}'] = f'{passed/n_questions*100:.2f}%'
+            sp = sum(1 for qr in all_question_results if any(g['correct'] for g in qr['generations'][:k]))
+            ub = np.mean([pass_at_k_estimator(n_generations, c, k) for c in correct_counts_so_far])
+            postfix[f's@{k}'] = f'{sp/n_questions*100:.1f}%'
+            postfix[f'u@{k}'] = f'{ub*100:.1f}%'
         progress_bar.update(current_batch_size)
         progress_bar.set_postfix(postfix)
 
