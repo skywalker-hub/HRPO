@@ -515,9 +515,14 @@ def grpo_trainer_compute_loss(function_name, function):
 
         token_entropies = inputs.get("token_entropies")
         if token_entropies is not None and token_entropies.numel() > 0:
-            mean_entropy = token_entropies.mean().item()
-            max_entropy = token_entropies.max().item()
-            min_entropy = token_entropies.min().item()
+            ent_mask = completion_mask.bool() if token_entropies.shape == completion_mask.shape else None
+            valid_ent = token_entropies[ent_mask] if ent_mask is not None else token_entropies.flatten()
+            if valid_ent.numel() > 0:
+                mean_entropy = valid_ent.mean().item()
+                max_entropy = valid_ent.max().item()
+                min_entropy = valid_ent.min().item()
+            else:
+                mean_entropy, max_entropy, min_entropy = 0.0, 0.0, 0.0
         else:
             mean_entropy, max_entropy, min_entropy = 0.0, 0.0, 0.0
 
