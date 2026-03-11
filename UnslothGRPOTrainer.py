@@ -4,6 +4,8 @@
 4.53.3
 0.15.2
 __UNSLOTH_VERSIONING__
+##注意：这只是个示例文件，不会真实运行。
+##实际训练代码每次运行时由grpo_trainer.py和rl_replacements.py动态拼接生成。
 """
 from torch import Tensor
 import torch
@@ -1203,6 +1205,14 @@ class _UnslothGRPOTrainer(Trainer):
         mean_embeds_ratio = embeds_ratio[embeds_ratio_mask].mean()
         mean_hidden_ratio = torch.sqrt(1 - embeds_ratio[embeds_ratio_mask] ** 2).mean()
 
+        token_entropies = inputs.get("token_entropies")
+        if token_entropies is not None and token_entropies.numel() > 0:
+            mean_entropy = token_entropies.mean().item()
+            max_entropy = token_entropies.max().item()
+            min_entropy = token_entropies.min().item()
+        else:
+            mean_entropy, max_entropy, min_entropy = 0.0, 0.0, 0.0
+
         # 获取 thinking_residual_head 的统计信息
         new_head_norm = 0.0
         new_head_mean = 0.0
@@ -1300,6 +1310,9 @@ class _UnslothGRPOTrainer(Trainer):
             self._metrics[mode]["discrete_norm"].append(discrete_norm)
             self._metrics[mode]["continuous_norm"].append(continuous_norm)
             self._metrics[mode]["thinking_norm_ratio"].append(thinking_norm_ratio)
+            self._metrics[mode]["entropy_mean"].append(mean_entropy)
+            self._metrics[mode]["entropy_max"].append(max_entropy)
+            self._metrics[mode]["entropy_min"].append(min_entropy)
         else:
             self._metrics["embeds_ratio"].append(mean_embeds_ratio.item())
             self._metrics["hidden_ratio"].append(mean_hidden_ratio.item())
@@ -1320,6 +1333,9 @@ class _UnslothGRPOTrainer(Trainer):
             self._metrics["discrete_norm"].append(discrete_norm)
             self._metrics["continuous_norm"].append(continuous_norm)
             self._metrics["thinking_norm_ratio"].append(thinking_norm_ratio)
+            self._metrics["entropy_mean"].append(mean_entropy)
+            self._metrics["entropy_max"].append(max_entropy)
+            self._metrics["entropy_min"].append(min_entropy)
 
         ####训练断点：此处会失去调试追踪：
         return loss
