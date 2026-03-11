@@ -3391,8 +3391,9 @@ class GenerationMixin:
             selected_probs = probs.gather(-1, next_tokens.unsqueeze(-1)).squeeze(-1)  # (batch_size,)
             token_probs_list.append(selected_probs.detach())
 
-            # 记录当前位置的分布熵 H = -Σ p·log(p)，加 1e-10 防止 log(0)
-            token_entropy = -(probs * torch.log(probs + 1e-10)).sum(dim=-1)  # (batch_size,)
+            # 归一化熵 H = -1/log(V) * Σ p·log(p)，H ∈ [0, 1]
+            V = probs.shape[-1]
+            token_entropy = -(probs * torch.log(probs + 1e-10)).sum(dim=-1) / torch.log(torch.tensor(V, dtype=probs.dtype, device=probs.device))  # (batch_size,)
             token_entropies_list.append(token_entropy.detach())
 
             # 更新 last_entropy 供下一步 thinking_residual 使用
