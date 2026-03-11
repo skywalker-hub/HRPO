@@ -572,13 +572,24 @@ class Qwen2Model(Qwen2PreTrainedModel):
         gate_r_input = torch.cat([embeds, last_hs], dim=-1)  # (batch, seq_len, 2 * hidden_size)
         r_t = torch.sigmoid(self.thinking_residual_gate_r(gate_r_input))
 
-        a_t = self.thinking_residual_Lambda(r_t)
+        # a_t = self.thinking_residual_Lambda(r_t)
+        # a_t = H / (β + 1)，H 为上一步分布熵
+        if last_entropy is not None:
+            H = last_entropy
+            if H.dim() == 1:
+                H = H.unsqueeze(-1).unsqueeze(-1)   # (batch,) → (batch, 1, 1)
+            elif H.dim() == 2:
+                H = H.unsqueeze(-1)                  # (batch, seq_len) → (batch, seq_len, 1)
+            beta = 2.0  #根据任务自定义
+            a_t = H / (beta + 1)
+        else:
+            a_t = self.thinking_residual_Lambda(r_t)
 
         # [当前] i_t 基于 embeds 计算，continuous_thinking = sqrt(1 - a_t^2) * (i_t * residual)
         i_t = torch.sigmoid(self.thinking_residual_gate_i(embeds))
 
         discrete_thinking = a_t * embeds
-        continuous_thinking = torch.sqrt(1 - a_t.pow(2) + eps) * (i_t * residual)
+        continuous_thinking = torch.sqrt(1 - a_t.pow(2) + eps) * (r_t * residual)
 
         # [已注释] 改动点2：i_t 基于 residual，使用 RMSNorm + head + token_gate 计算 continuous_bias
         # i_t = torch.sigmoid(self.thinking_residual_gate_i(residual))  # 保留 i_t 定义，但不再使用
