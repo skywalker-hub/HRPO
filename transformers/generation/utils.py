@@ -3288,7 +3288,7 @@ class GenerationMixin:
                 model_forward = self.get_compiled_call(generation_config.compile_config)
 
         is_prefill = True
-        is_thinking, last_thinking_states, last_hs = None, None, None
+        is_thinking, last_thinking_states, last_hs, last_entropy = None, None, None, None
         thinking_embeds = [self.get_input_embeddings()(input_ids)] if return_thinking_embeds else []
         thinking_mask = [
             torch.zeros_like(input_ids, dtype=torch.bool, device=input_ids.device)
@@ -3300,6 +3300,7 @@ class GenerationMixin:
         last_hs_list = [
             torch.zeros_like(thinking_embeds[0]) if thinking_embeds else None
         ] if return_thinking_embeds else []
+        last_entropy_list = [] if return_thinking_embeds else []
 
         # 逐位置记录：选中 token 的概率 & 分布熵（训练和推理均可用）
         token_probs_list = []       # 每步 append shape (batch_size,)
@@ -3320,6 +3321,7 @@ class GenerationMixin:
             model_inputs.update({"is_thinking": is_thinking} if is_thinking is not None else {})
             model_inputs.update({"last_thinking_states": last_thinking_states} if last_thinking_states is not None else {})
             model_inputs.update({"last_hs": last_hs} if last_hs is not None else {})
+            model_inputs.update({"last_entropy": last_entropy} if last_entropy is not None else {})
 
             
             #####第一次迭代，处理完整的输入 prompt
@@ -3393,6 +3395,9 @@ class GenerationMixin:
             token_entropy = -(probs * torch.log(probs + 1e-10)).sum(dim=-1)  # (batch_size,)
             token_entropies_list.append(token_entropy.detach())
 
+            # 更新 last_entropy 供下一步 thinking_residual 使用
+            last_entropy = token_entropy.detach()
+
             # 将抽样得到的id拼接得到序列
             # update generated ids, model inputs, and length for next step
             input_ids = torch.cat([input_ids, next_tokens[:, None]], dim=-1)
@@ -3407,8 +3412,9 @@ class GenerationMixin:
             #####主断点：论文公式（3）中的 h_t+1 在此处计算
             ##########在此处可更改连续思维 h 的计算方式
 
-            # 保存本步 thinking_residual 实际使用的 last_hs（更新前的值）
+            # 保存本步 thinking_residual 实际使用的 last_hs 和 last_entropy（更新前的值）
             _last_hs_used_this_step = last_hs
+            _last_entropy_used_this_step = last_entropy
 
             # ① 先提取原始隐状态 last_hs（每步都记录，可选择供 thinking_residual gate_r 使用）
             if outputs.hidden_states is not None and len(outputs.hidden_states) > 3:
@@ -3441,6 +3447,10 @@ class GenerationMixin:
                     last_hs_list.append(_last_hs_used_this_step.unsqueeze(1))
                 else:
                     last_hs_list.append(torch.zeros_like(outputs.hidden_states[0].unsqueeze(1)))
+                if _last_entropy_used_this_step is not None:
+                    last_entropy_list.append(_last_entropy_used_this_step.unsqueeze(-1))
+                else:
+                    last_entropy_list.append(torch.zeros(input_ids.shape[0], 1, device=input_ids.device))
 
             unfinished_sequences = unfinished_sequences & ~stopping_criteria(input_ids, scores)
             this_peer_finished = unfinished_sequences.max() == 0
@@ -3496,10 +3506,12 @@ class GenerationMixin:
                     torch.ones_like(input_ids[:, -1:], dtype=torch.float32, device=input_ids.device)
                 )
                 last_hs_list.append(torch.zeros_like(thinking_embeds[-1]))
+                last_entropy_list.append(torch.zeros(input_ids.shape[0], 1, device=input_ids.device))
                 # 拼接逐位置指标，追加在 tuple 末尾返回
                 _token_probs = torch.stack(token_probs_list, dim=1) if token_probs_list else torch.zeros(input_ids.shape[0], 0, device=input_ids.device)
                 _token_entropies = torch.stack(token_entropies_list, dim=1) if token_entropies_list else torch.zeros(input_ids.shape[0], 0, device=input_ids.device)
-                return input_ids, torch.cat(thinking_embeds, dim=1), torch.cat(thinking_mask, dim=1), torch.cat(embeds_ratio, dim=1), torch.cat(last_hs_list, dim=1), _token_probs, _token_entropies
+                _saved_last_entropy = torch.cat(last_entropy_list, dim=1) if last_entropy_list else torch.zeros(input_ids.shape[0], 0, device=input_ids.device)
+                return input_ids, torch.cat(thinking_embeds, dim=1), torch.cat(thinking_mask, dim=1), torch.cat(embeds_ratio, dim=1), torch.cat(last_hs_list, dim=1), _token_probs, _token_entropies, _saved_last_entropy
             else:
                 return input_ids
 

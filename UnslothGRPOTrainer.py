@@ -179,6 +179,7 @@ def grpo_accumulated_loss(
     completion_mask,
     advantages,
     saved_last_hs = None,
+    saved_last_entropy = None,
     n_chunks = -1,
 ):
 
@@ -208,11 +209,12 @@ def grpo_accumulated_loss(
         if thinking_embeds is not None: thinking_embeds = thinking_embeds.clone()
         if thinking_mask is not None: thinking_mask = thinking_mask.clone()
         if saved_last_hs is not None: saved_last_hs = saved_last_hs.clone()
+        if saved_last_entropy is not None: saved_last_entropy = saved_last_entropy.clone()
 
         ####训练断点：
         # 前向3
         # 策略前向
-        new_hidden_states = trainer.model(input_ids = input_ids, inputs_embeds = thinking_embeds, thinking_mask = thinking_mask, saved_last_hs = saved_last_hs, logits_to_keep = logits_to_keep + 1).logits
+        new_hidden_states = trainer.model(input_ids = input_ids, inputs_embeds = thinking_embeds, thinking_mask = thinking_mask, saved_last_hs = saved_last_hs, saved_last_entropy = saved_last_entropy, logits_to_keep = logits_to_keep + 1).logits
         
         loss, completion_length, mean_kl = UnslothEfficientGRPO.apply(
             new_hidden_states, old_hidden_states, lm_head,
@@ -999,7 +1001,7 @@ class _UnslothGRPOTrainer(Trainer):
             # 前向1
             ##已确认训练经过，此处开始多端口。生成第一次前向，这里生成多组回答。
             with unwrap_model_for_generation(self.model, self.accelerator) as unwrapped_model:
-                prompt_completion_ids, thinking_embeds, thinking_mask, embeds_ratio, saved_last_hs, token_probs, token_entropies = unwrapped_model.generate(
+                prompt_completion_ids, thinking_embeds, thinking_mask, embeds_ratio, saved_last_hs, token_probs, token_entropies, saved_last_entropy = unwrapped_model.generate(
                     prompt_ids, attention_mask=prompt_mask, 
                     generation_config=self.generation_config,
                     processing_class=self.processing_class,
@@ -1133,6 +1135,7 @@ class _UnslothGRPOTrainer(Trainer):
             "thinking_mask": thinking_mask,
             "embeds_ratio": embeds_ratio,
             "saved_last_hs": saved_last_hs,
+            "saved_last_entropy": saved_last_entropy,
             "token_probs": token_probs,           # 每个生成位置选中 token 的概率
             "token_entropies": token_entropies,    # 每个生成位置的分布熵
             "ref_per_token_logps": ref_per_token_logps,
@@ -1150,6 +1153,7 @@ class _UnslothGRPOTrainer(Trainer):
         completion_ids, completion_mask = inputs["completion_ids"], inputs["completion_mask"]
         thinking_embeds, thinking_mask = inputs["thinking_embeds"], inputs["thinking_mask"]
         saved_last_hs = inputs["saved_last_hs"]
+        saved_last_entropy = inputs.get("saved_last_entropy")
         input_ids = torch.cat([prompt_ids, completion_ids], dim=1)
         bsz, qlen = input_ids.shape
         attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
@@ -1158,6 +1162,7 @@ class _UnslothGRPOTrainer(Trainer):
         _input_ids = input_ids
         _thinking_embeds = thinking_embeds
         _saved_last_hs = saved_last_hs
+        _saved_last_entropy = saved_last_entropy
         _logits_to_keep = logits_to_keep
         
         per_token_logps = self._get_per_token_logps(model, input_ids, thinking_embeds, attention_mask, logits_to_keep)
@@ -1183,6 +1188,7 @@ class _UnslothGRPOTrainer(Trainer):
             loss, completion_length, mean_kl = grpo_accumulated_loss(
                 self, _input_ids, _thinking_embeds, thinking_mask, logits_to_keep, completion_mask, advantages,
                 saved_last_hs = _saved_last_hs,
+                saved_last_entropy = _saved_last_entropy,
                 n_chunks = self.args.unsloth_num_chunks,
             )
 

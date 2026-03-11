@@ -562,7 +562,7 @@ class LlamaModel(LlamaPreTrainedModel):
     #####HRPO主断点：HRPO核心模块，HRPO核心计算函数定义处
     #####embeds:最后一个词嵌入向量，residual此时为上一步的原始隐藏状态
     #####此处可更改连续思考的混合方法
-    def thinking_residual(self, embeds, residual, input_ids=None, last_hs=None, eps=1e-8):
+    def thinking_residual(self, embeds, residual, input_ids=None, last_hs=None, last_entropy=None, eps=1e-8):
         """
         混合推理残差计算函数
 
@@ -572,6 +572,8 @@ class LlamaModel(LlamaPreTrainedModel):
             input_ids: 当前 token 的 ID (batch, seq_len)，用于查询门控矩阵
             last_hs: 上一步 Transformer 输出的原始隐状态 (batch, seq_len, hidden_size)，
                      用于 gate_r 计算；为 None 时回退到 residual
+            last_entropy: 上一步 softmax 分布的熵 (batch,) 或 (batch, seq_len)，
+                         可用于调节 thinking_residual 计算强度
             eps: 数值稳定性参数
 
         Returns:
