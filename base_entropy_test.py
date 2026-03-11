@@ -34,16 +34,18 @@ def compute_entropy(logits: torch.Tensor) -> float:
 
 def run_entropy_test(
     model_path: str,
-    adapter_path: str,
-    temperature: float,
-    is_inference: bool,
+    adapter_path: str = None,
+    temperature: float = 0.7,
+    is_inference: bool = False,
     question: str = QUESTION,
+    base_only: bool = False,
 ):
     # ---- 1. 加载模型 ----
     print("=" * 60)
     print("加载模型...")
     print(f"  基础模型: {model_path}")
-    print(f"  Adapter:  {adapter_path}")
+    print(f"  Adapter:  {adapter_path if not base_only else '(无 - 基础模型测试)'}")
+    print(f"  Base only: {base_only}")
     print(f"  Temperature: {temperature}")
     print(f"  Greedy (is_inference): {is_inference}")
     print("=" * 60)
@@ -58,30 +60,33 @@ def run_entropy_test(
     tokenizer.padding_side = "left"
     tokenizer.pad_token = tokenizer.eos_token
 
-    model.load_adapter(adapter_path)
+    if not base_only and adapter_path:
+        model.load_adapter(adapter_path)
     model = FastLanguageModel.for_inference(model)
 
     # ---- 1.5 从 checkpoint 文件直接加载 token_gate_matrix ----
-    import os as _os
-    gate_weight = None
-    for filename in ["adapter_model.safetensors", "adapter_model.bin"]:
-        filepath = _os.path.join(adapter_path, filename)
-        if _os.path.exists(filepath):
-            if filename.endswith(".safetensors"):
-                from safetensors.torch import load_file
-                state_dict = load_file(filepath)
-            else:
-                state_dict = torch.load(filepath, map_location="cpu")
-            for key, value in state_dict.items():
-                if "token_gate_matrix" in key and "weight" in key:
-                    gate_weight = value
-                    print(f"从 {filename} 加载 token_gate_matrix: {key}, shape={gate_weight.shape}")
-                    break
-            del state_dict
-            break
-    if gate_weight is None:
-        raise RuntimeError("未在 checkpoint 中找到 token_gate_matrix 权重")
-    row_sigmoid_mean = torch.sigmoid(gate_weight).mean(dim=1)  # (vocab_size,)
+    row_sigmoid_mean = None
+    if not base_only and adapter_path:
+        import os as _os
+        gate_weight = None
+        for filename in ["adapter_model.safetensors", "adapter_model.bin"]:
+            filepath = _os.path.join(adapter_path, filename)
+            if _os.path.exists(filepath):
+                if filename.endswith(".safetensors"):
+                    from safetensors.torch import load_file
+                    state_dict = load_file(filepath)
+                else:
+                    state_dict = torch.load(filepath, map_location="cpu")
+                for key, value in state_dict.items():
+                    if "token_gate_matrix" in key and "weight" in key:
+                        gate_weight = value
+                        print(f"从 {filename} 加载 token_gate_matrix: {key}, shape={gate_weight.shape}")
+                        break
+                del state_dict
+                break
+        if gate_weight is None:
+            raise RuntimeError("未在 checkpoint 中找到 token_gate_matrix 权重")
+        row_sigmoid_mean = torch.sigmoid(gate_weight).mean(dim=1)  # (vocab_size,)
 
     # ---- 2. 构造 Prompt ----
     prompt = [
@@ -109,20 +114,33 @@ def run_entropy_test(
     # output_scores=True 让 generate() 在每步前向传播时记录 logits 并通过返回值返回
     print("\n正在生成回复...")
     with torch.no_grad():
-        outputs = model.generate(
-            prompt_ids,
-            attention_mask=prompt_mask,
-            generation_config=GenerationConfig(
-                do_sample=True,
-                temperature=temperature,
-                max_new_tokens=512,
-                output_scores=True,
-                return_dict_in_generate=True,
-            ),
-            processing_class=tokenizer,
-            is_inference=is_inference,
-            return_thinking_embeds=True,
-        )
+        if base_only:
+            outputs = model.generate(
+                prompt_ids,
+                attention_mask=prompt_mask,
+                generation_config=GenerationConfig(
+                    do_sample=True,
+                    temperature=temperature,
+                    max_new_tokens=512,
+                    output_scores=True,
+                    return_dict_in_generate=True,
+                ),
+            )
+        else:
+            outputs = model.generate(
+                prompt_ids,
+                attention_mask=prompt_mask,
+                generation_config=GenerationConfig(
+                    do_sample=True,
+                    temperature=temperature,
+                    max_new_tokens=512,
+                    output_scores=True,
+                    return_dict_in_generate=True,
+                ),
+                processing_class=tokenizer,
+                is_inference=is_inference,
+                return_thinking_embeds=True,
+            )
 
     # ---- 4. 解码文本 ----
     generated_ids = outputs.sequences[0][prompt_length:]
@@ -142,14 +160,23 @@ def run_entropy_test(
     print(f"\n【提取的答案】{generated_answer}")
     print("=" * 60)
 
-    # ---- 5. 直接从 generate() 返回值中获取逐位置指标 ----
-    # token_entropies: (batch, num_steps) — 每步 softmax 分布的熵
-    # token_probs:     (batch, num_steps) — 每步选中 token 的概率
-    entropies_tensor = outputs.token_entropies[0].cpu().float()   # (num_steps,)
-    token_probs_tensor = outputs.token_probs[0].cpu().float()     # (num_steps,)
-    num_steps = entropies_tensor.shape[0]
-    entropies = entropies_tensor.tolist()
-    token_probs_values = token_probs_tensor.tolist()
+    # ---- 5. 逐位置指标 ----
+    if base_only:
+        entropies = []
+        token_probs_values = []
+        for step_idx, score in enumerate(outputs.scores):
+            ent = compute_entropy(score[0])
+            entropies.append(ent)
+            probs = torch.softmax(score[0].float(), dim=-1)
+            token_id = generated_ids[step_idx].item()
+            token_probs_values.append(probs[token_id].item())
+        num_steps = len(entropies)
+    else:
+        entropies_tensor = outputs.token_entropies[0].cpu().float()   # (num_steps,)
+        token_probs_tensor = outputs.token_probs[0].cpu().float()     # (num_steps,)
+        num_steps = entropies_tensor.shape[0]
+        entropies = entropies_tensor.tolist()
+        token_probs_values = token_probs_tensor.tolist()
 
     gate_values = []
     tokens_text = []
@@ -173,7 +200,10 @@ def run_entropy_test(
         token_id = generated_ids[step_idx].item()
         token_str = tokenizer.decode([token_id])
         tokens_text.append(token_str)
-        gate_values.append(row_sigmoid_mean[token_id].item())
+        if row_sigmoid_mean is not None:
+            gate_values.append(row_sigmoid_mean[token_id].item())
+        else:
+            gate_values.append(float("nan"))
 
         if hr_vectors is not None and step_idx < hr_vectors.shape[0]:
             hr_vec = hr_vectors[step_idx]  # (hidden_size,)
@@ -216,10 +246,11 @@ def run_entropy_test(
     print(f"  标准差: {ent_array.std():.4f}")
     print(f"  最小值: {ent_array.min():.4f} (step {ent_array.argmin() + 1})")
     print(f"  最大值: {ent_array.max():.4f} (step {ent_array.argmax() + 1})")
-    print(f"\nToken Gate Sigmoid 统计:")
-    print(f"  平均值: {gate_array.mean():.6f}")
-    print(f"  最小值: {gate_array.min():.6f} (step {gate_array.argmin() + 1})")
-    print(f"  最大值: {gate_array.max():.6f} (step {gate_array.argmax() + 1})")
+    if not base_only:
+        print(f"\nToken Gate Sigmoid 统计:")
+        print(f"  平均值: {gate_array.mean():.6f}")
+        print(f"  最小值: {gate_array.min():.6f} (step {gate_array.argmin() + 1})")
+        print(f"  最大值: {gate_array.max():.6f} (step {gate_array.argmax() + 1})")
     if has_a_t:
         valid_mask = ~np.isnan(hr_mean_array)
         valid_hr_mean = hr_mean_array[valid_mask]
@@ -313,8 +344,11 @@ def run_entropy_test(
     fig.tight_layout()
 
     # 保存图片
-    save_dir = adapter_path if os.path.isdir(adapter_path) else os.path.dirname(adapter_path)
-    if not save_dir:
+    if not base_only and adapter_path:
+        save_dir = adapter_path if os.path.isdir(adapter_path) else os.path.dirname(adapter_path)
+        if not save_dir:
+            save_dir = "."
+    else:
         save_dir = "."
     plot_path = os.path.join(save_dir, "entropy_plot.png")
     fig.savefig(plot_path, dpi=150)
@@ -637,10 +671,10 @@ def run_entropy_test(
         "entropy_std": float(ent_array.std()),
         "token_prob_mean": float(prob_array.mean()),
         "token_prob_std": float(prob_array.std()),
-        "gate_sigmoid_mean": float(gate_array.mean()),
+        "gate_sigmoid_mean": float(gate_array.mean()) if not np.all(np.isnan(gate_array)) else None,
         "token_probs": token_probs_values,
         "entropies": [float(e) for e in entropies],
-        "gate_values": [float(g) for g in gate_values],
+        "gate_values": [float(g) if not np.isnan(g) else None for g in gate_values],
         "hidden_ratio_mean": [float(r) if not np.isnan(r) else None for r in hr_mean_values],
         "hidden_ratio_std": [float(r) if not np.isnan(r) else None for r in hr_std_values],
         "hidden_ratio_min": [float(r) if not np.isnan(r) else None for r in hr_min_values],
@@ -658,7 +692,8 @@ def run_entropy_test(
 
 if __name__ == "__main__":
     # ====== 在此处手动修改参数，直接运行即可调试 ======
-    checkpoint_path = "/root/autodl-tmp/HRPO/test301.1/Qwen2.5-3B-Instruct-gsm8k-group4-lora32-lr0.01-init-2-rmin0.981-temp0.5/checkpoint-934"  # 修改为你的 adapter 路径
+    BASE_ONLY = True       # True = 测试基础模型, False = 测试训练后模型(需要adapter)
+    checkpoint_path = "/root/autodl-tmp/HRPO/test301.1/Qwen2.5-3B-Instruct-gsm8k-group4-lora32-lr0.01-init-2-rmin0.981-temp0.5/checkpoint-934"
     temperature = 0.5
     is_inference = False   # True = greedy, False = sampling
     # ================================================
@@ -675,14 +710,16 @@ if __name__ == "__main__":
         if model_name in checkpoint_path:
             base_model = local_model_paths.get(model_name, model)
 
-    print(f"Checkpoint: {checkpoint_path}")
+    print(f"Base only: {BASE_ONLY}")
+    print(f"Checkpoint: {checkpoint_path if not BASE_ONLY else '(不使用)'}")
     print(f"Base model: {base_model}")
     print(f"Temperature: {temperature}")
 
     run_entropy_test(
         model_path=base_model,
-        adapter_path=checkpoint_path,
+        adapter_path=None if BASE_ONLY else checkpoint_path,
         temperature=temperature,
         is_inference=is_inference,
         question=QUESTION,
+        base_only=BASE_ONLY,
     )
