@@ -576,12 +576,13 @@ class Qwen2Model(Qwen2PreTrainedModel):
         # a_t = H / (β + 1)，H 为上一步分布熵
         if last_entropy is not None:
             H = last_entropy
-            if H.dim() == 1:
-                H = H.unsqueeze(-1).unsqueeze(-1)   # (batch,) → (batch, 1, 1)
-            elif H.dim() == 2:
-                H = H.unsqueeze(-1)                  # (batch, seq_len) → (batch, seq_len, 1)
-            beta = 1.0  #根据任务自定义
-            a_t = beta + 1 - H / (beta + 1)
+            # 对齐到 embeds 的维度：
+            #   推理时 embeds=(batch,1,hd), H=(batch,) → (batch,1,1)
+            #   训练时 embeds=(N,hd),       H=(N,)    → (N,1)
+            while H.dim() < embeds.dim():
+                H = H.unsqueeze(-1)
+            beta = self.thinking_residual_Lambda(r_t)
+            a_t = H / (beta + 1)
         else:
             a_t = self.thinking_residual_Lambda(r_t)
 
