@@ -3300,7 +3300,9 @@ class GenerationMixin:
         last_hs_list = [
             torch.zeros_like(thinking_embeds[0]) if thinking_embeds else None
         ] if return_thinking_embeds else []
-        last_entropy_list = [] if return_thinking_embeds else []
+        last_entropy_list = [
+            torch.zeros(input_ids.shape[0], input_ids.shape[1], device=input_ids.device)
+        ] if return_thinking_embeds else []
 
         # 逐位置记录：选中 token 的概率 & 分布熵（训练和推理均可用）
         token_probs_list = []       # 每步 append shape (batch_size,)
