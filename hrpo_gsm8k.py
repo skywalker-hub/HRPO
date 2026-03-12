@@ -44,8 +44,9 @@ def main(args):
             "thinking_residual_gate_r",
             "thinking_residual_gate_i",
             "thinking_residual_Lambda",
-            "thinking_residual_head",  # 新增: 隐状态变换头
-            "token_gate_matrix",  # 新增: Token 门控矩阵
+            "thinking_residual_head",  # 隐状态变换头
+            "thinking_residual_gate_beta",  # β 门控：softplus(W_β[h∥e]+b_β)
+            "token_gate_matrix",  # Token 门控矩阵
         ], 
         lora_alpha = args.lora_rank * 2,
         use_gradient_checkpointing = "unsloth",
@@ -77,6 +78,17 @@ def main(args):
     # ★★★ 真正生效的初始化 ★★★
     nn.init.zeros_(head_trainable_weight)  # thinking_residual_head: 初始化为 0
 
+    # gate_beta 初始化：W_β=0, b_β=20 → softplus(20)≈20 → a_t=1-H/21≥0.95
+    beta_module = model.model.model.thinking_residual_gate_beta
+    if hasattr(beta_module, 'modules_to_save'):
+        beta_w = beta_module.modules_to_save.default.weight
+        beta_b = beta_module.modules_to_save.default.bias
+    else:
+        beta_w = beta_module.weight
+        beta_b = beta_module.bias
+    nn.init.zeros_(beta_w)
+    nn.init.constant_(beta_b, 20.0)
+
     ###门控初始化/监控
     token_gate_init = -2.0  # 只在这里控制 gate 初始化值（文件名/检查都引用该值）
     nn.init.constant_(gate_trainable_weight, token_gate_init)  # token_gate_matrix: 初始化为 -3, sigmoid(-3)≈0.047
@@ -84,6 +96,7 @@ def main(args):
     
     print(f"\n初始化完成:")
     print(f"  thinking_residual_head: 使用 {'modules_to_save.default' if hasattr(head_module, 'modules_to_save') else 'weight'}")
+    print(f"  thinking_residual_gate_beta: W=0, b=20.0 (使用 {'modules_to_save.default' if hasattr(beta_module, 'modules_to_save') else 'weight'})")
     print(f"  token_gate_matrix: 使用 {'modules_to_save.default' if hasattr(gate_module, 'modules_to_save') else 'weight'}")
 
     ###保存文件名（init 统一使用上面 token_gate_init）
@@ -108,7 +121,20 @@ def main(args):
     print(f"  均值: {head_weight.mean().item():.6f}")
     print(f"  是否全为0: {(head_weight == 0).all().item()}")
     
-    # 2. token_gate_matrix 初始值（期望）
+    # 2. thinking_residual_gate_beta 初始值（期望 W=0, b=20）
+    print(f"\n[thinking_residual_gate_beta]")
+    print(f"  weight 形状: {beta_w.data.shape}")
+    print(f"  weight 是否全为0: {(beta_w.data == 0).all().item()}")
+    print(f"  bias 值: {beta_b.data.item():.4f} (期望 20.0)")
+    import torch.nn.functional as F
+    dummy_input = torch.zeros(1, beta_w.shape[1], device=beta_w.device, dtype=beta_w.dtype)
+    beta_init_val = F.softplus(F.linear(dummy_input, beta_w.data, beta_b.data)).item()
+    a_t_worst = 1.0 - 1.0 / (beta_init_val + 1.0)
+    print(f"  初始 β = softplus(0 + {beta_b.data.item():.1f}) = {beta_init_val:.4f}")
+    print(f"  最坏情况(H=1) a_t = 1 - 1/({beta_init_val:.1f}+1) = {a_t_worst:.4f} (需≥0.95)")
+    print(f"  requires_grad: {beta_w.requires_grad}, {beta_b.requires_grad}")
+
+    # 3. token_gate_matrix 初始值
     gate_weight = gate_trainable_weight.data
     print(f"\n[token_gate_matrix]")
     print(f"  形状: {gate_weight.shape}")

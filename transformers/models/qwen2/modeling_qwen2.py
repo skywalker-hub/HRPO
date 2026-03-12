@@ -537,12 +537,6 @@ class Qwen2Model(Qwen2PreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
-        # post_init → _init_weights 会把所有 Linear bias 清零，
-        # 必须在其之后重设 gate_beta 的初始化：
-        #   W_β ≈ 0 + b_β = 20 → softplus(20) ≈ 20 → a_t = 1 - H/(21) ≥ 0.95
-        nn.init.zeros_(self.thinking_residual_gate_beta.weight)
-        nn.init.constant_(self.thinking_residual_gate_beta.bias, 20.0)
-
     def get_input_embeddings(self):
         return self.embed_tokens
 
