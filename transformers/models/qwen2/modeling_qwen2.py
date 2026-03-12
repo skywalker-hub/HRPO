@@ -519,6 +519,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
         self.thinking_residual_gate_r = nn.Linear(config.hidden_size * 2, config.hidden_size)
         self.thinking_residual_gate_i = nn.Linear(config.hidden_size, config.hidden_size)
         self.thinking_residual_Lambda = ThinkingResidualLambda(config)
+        self.thinking_residual_gate_beta = nn.Linear(config.hidden_size * 2, 1)
         
         # 新增：隐状态变换头，将原始隐状态投影到 thinking residual 空间
         # 形状选择说明：
@@ -535,6 +536,12 @@ class Qwen2Model(Qwen2PreTrainedModel):
 
         # Initialize weights and apply final processing
         self.post_init()
+
+        # post_init → _init_weights 会把所有 Linear bias 清零，
+        # 必须在其之后重设 gate_beta 的初始化：
+        #   W_β ≈ 0 + b_β = 20 → softplus(20) ≈ 20 → a_t = 1 - H/(21) ≥ 0.95
+        nn.init.zeros_(self.thinking_residual_gate_beta.weight)
+        nn.init.constant_(self.thinking_residual_gate_beta.bias, 20.0)
 
     def get_input_embeddings(self):
         return self.embed_tokens
@@ -576,12 +583,14 @@ class Qwen2Model(Qwen2PreTrainedModel):
         # a_t = H / (β + 1)，H 为上一步分布熵
         if last_entropy is not None:
             H = last_entropy
-            # 对齐到 embeds 的维度：
-            #   推理时 embeds=(batch,1,hd), H=(batch,) → (batch,1,1)
-            #   训练时 embeds=(N,hd),       H=(N,)    → (N,1)
             while H.dim() < embeds.dim():
                 H = H.unsqueeze(-1)
-            beta = self.thinking_residual_Lambda(r_t)
+            # β_t = softplus(W_β [ĥ_t ∥ ê_{y_t}] + b_β)
+            # b_β=20 → 初始时 softplus(20)≈20 → a_t=1-H/21 ≥ 0.95
+            # 形状：推理 (batch,1,1)，训练 (N,1)，广播兼容 H
+            beta = nn.functional.softplus(
+                self.thinking_residual_gate_beta(gate_r_input)
+            )
             b_t = H / (beta + 1)
             a_t = 1 - b_t
         else:
