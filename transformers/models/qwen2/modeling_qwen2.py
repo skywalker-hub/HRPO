@@ -591,7 +591,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
         #i_t = torch.sigmoid(self.thinking_residual_gate_i(embeds))
 
         discrete_thinking = a_t * embeds
-        continuous_thinking =b_t * (r_t * residual)
+        continuous_thinking = b_t * (r_t * residual)
         #torch.sqrt(1 - a_t.pow(2) + eps) * (i_t * residual)
 
         # [已注释] 改动点2：i_t 基于 residual，使用 RMSNorm + head + token_gate 计算 continuous_bias
