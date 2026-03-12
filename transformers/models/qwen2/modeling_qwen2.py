@@ -581,7 +581,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
             #   训练时 embeds=(N,hd),       H=(N,)    → (N,1)
             while H.dim() < embeds.dim():
                 H = H.unsqueeze(-1)
-            beta = self.thinking_residual_Lambda(r_t)
+            beta = 1.0
             b_t = H / (beta + 1)
             a_t = 1 - b_t
         else:
