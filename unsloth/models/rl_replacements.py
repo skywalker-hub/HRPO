@@ -511,7 +511,7 @@ def grpo_trainer_compute_loss(function_name, function):
         embeds_ratio = inputs["embeds_ratio"]
         embeds_ratio_mask = embeds_ratio < 1.
         mean_embeds_ratio = embeds_ratio[embeds_ratio_mask].mean()
-        mean_hidden_ratio = torch.sqrt(1 - embeds_ratio[embeds_ratio_mask] ** 2).mean()
+        mean_hidden_ratio = (1 - embeds_ratio[embeds_ratio_mask]).mean()
 
         token_entropies = inputs.get("token_entropies")
         if token_entropies is not None and token_entropies.numel() > 0:
