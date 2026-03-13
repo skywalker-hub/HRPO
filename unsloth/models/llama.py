@@ -672,12 +672,15 @@ def LlamaModel_fast_forward(
         masked_last_hs = saved_last_hs[thinking_mask] if saved_last_hs is not None else None
         saved_last_entropy = kwargs.get('saved_last_entropy')
         masked_last_entropy = saved_last_entropy[thinking_mask] if saved_last_entropy is not None else None
-        new_inputs_embeds[thinking_mask] = self.thinking_residual(
+        _tr_out = self.thinking_residual(
             inputs_embeds[thinking_mask], thinking_embeds[thinking_mask],
             input_ids=masked_input_ids,
             last_hs=masked_last_hs,
             last_entropy=masked_last_entropy,
-        )[0].to(inputs_embeds.dtype)
+        )
+        new_inputs_embeds[thinking_mask] = _tr_out[0].to(inputs_embeds.dtype)
+        if _tr_out[2] is not None:
+            self._last_beta_t = _tr_out[2].detach().mean().item()
         inputs_embeds = new_inputs_embeds
 
     inputs_embeds = inputs_embeds.to(_get_dtype(self.config.torch_dtype))
@@ -963,7 +966,7 @@ def LlamaModel_fast_forward_inference(
         ##############主断点11：HRPO实际调用处
         ##############上一时刻的隐状态和embedd在这里送往HRPO进行计算得出混合向量，再送入attention计算
         # 传入 input_ids 用于查询 token 门控矩阵
-        X_hat, a_t = self.model.thinking_residual(
+        X_hat, a_t, beta_t = self.model.thinking_residual(
             X, last_thinking_states.unsqueeze(1),
             input_ids=input_ids,
             last_hs=last_hs.unsqueeze(1) if last_hs is not None else None,
@@ -974,6 +977,12 @@ def LlamaModel_fast_forward_inference(
         embeds_ratio[~torch.tensor(is_thinking)] = 1.
         a_t_vector = a_t.squeeze(1)  # (batch, hidden_size) — 保留逐维度的完整向量
         a_t_vector[~torch.tensor(is_thinking)] = 1.0
+        # beta_t: (batch,1,1) → (batch,) 标量；非 thinking 位置填 0
+        if beta_t is not None:
+            beta_scalar = beta_t.view(-1)
+            beta_scalar[~torch.tensor(is_thinking)] = 0.0
+        else:
+            beta_scalar = torch.zeros(bsz, device=X.device, dtype=X.dtype)
         X[is_thinking] = X_hat[is_thinking].to(X.dtype)
 
 
@@ -1056,7 +1065,7 @@ def LlamaModel_fast_forward_inference(
         last_hidden_state = X,  #####返回计算出来的隐状态h
         past_key_values = next_decoder_cache,
         # 新增: 在 hidden_states中，在数组下标3处传回原始隐状态X，用于后续计算 last_thinking_states
-        hidden_states = [] if is_thinking is None else [thinking_embeds, is_thinking, embeds_ratio, X.squeeze(1), a_t_vector],
+        hidden_states = [] if is_thinking is None else [thinking_embeds, is_thinking, embeds_ratio, X.squeeze(1), a_t_vector, beta_scalar],
         attentions = [],
     )
 pass

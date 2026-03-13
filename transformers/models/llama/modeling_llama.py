@@ -603,7 +603,7 @@ class LlamaModel(LlamaPreTrainedModel):
                 self._continuous_norm = continuous_norm.item()
                 self._thinking_norm_ratio = continuous_norm.item() / total_norm.item()
 
-        return discrete_thinking + continuous_thinking, a_t
+        return discrete_thinking + continuous_thinking, a_t, None
 
     @add_start_docstrings_to_model_forward(LLAMA_INPUTS_DOCSTRING)
     def forward(

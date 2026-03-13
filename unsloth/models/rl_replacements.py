@@ -526,6 +526,20 @@ def grpo_trainer_compute_loss(function_name, function):
         else:
             mean_entropy, max_entropy, min_entropy = 0.0, 0.0, 0.0
 
+        # beta 门控统计（生成阶段记录的逐位置 beta 值 + 训练阶段的 _last_beta_t）
+        saved_beta = inputs.get("saved_beta")
+        if saved_beta is not None and saved_beta.numel() > 0:
+            beta_mask = saved_beta > 0
+            valid_beta = saved_beta[beta_mask]
+            if valid_beta.numel() > 0:
+                mean_beta = valid_beta.mean().item()
+                max_beta = valid_beta.max().item()
+                min_beta = valid_beta.min().item()
+            else:
+                mean_beta, max_beta, min_beta = 0.0, 0.0, 0.0
+        else:
+            mean_beta, max_beta, min_beta = 0.0, 0.0, 0.0
+
         # 获取 thinking_residual_head 的统计信息
         new_head_norm = 0.0
         new_head_mean = 0.0
@@ -599,6 +613,10 @@ def grpo_trainer_compute_loss(function_name, function):
             discrete_norm = getattr(base_model, '_discrete_norm', 0.0)
             continuous_norm = getattr(base_model, '_continuous_norm', 0.0)
             thinking_norm_ratio = getattr(base_model, '_thinking_norm_ratio', 0.0)
+            # 训练 forward 中记录的 beta 均值（补充生成阶段的统计）
+            train_beta = getattr(base_model, '_last_beta_t', None)
+            if train_beta is not None and mean_beta == 0.0:
+                mean_beta = train_beta
         except:
             pass
 
@@ -626,6 +644,10 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics[mode]["entropy_mean"].append(mean_entropy)
             self._metrics[mode]["entropy_max"].append(max_entropy)
             self._metrics[mode]["entropy_min"].append(min_entropy)
+            # beta 门控监控
+            self._metrics[mode]["beta_mean"].append(mean_beta)
+            self._metrics[mode]["beta_max"].append(max_beta)
+            self._metrics[mode]["beta_min"].append(min_beta)
         else:
             self._metrics["embeds_ratio"].append(mean_embeds_ratio.item())
             self._metrics["hidden_ratio"].append(mean_hidden_ratio.item())
@@ -649,6 +671,10 @@ def grpo_trainer_compute_loss(function_name, function):
             self._metrics["entropy_mean"].append(mean_entropy)
             self._metrics["entropy_max"].append(max_entropy)
             self._metrics["entropy_min"].append(min_entropy)
+            # beta 门控监控
+            self._metrics["beta_mean"].append(mean_beta)
+            self._metrics["beta_max"].append(max_beta)
+            self._metrics["beta_min"].append(min_beta)
         return loss
     pass
 

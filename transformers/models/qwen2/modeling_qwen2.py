@@ -582,14 +582,15 @@ class Qwen2Model(Qwen2PreTrainedModel):
             # β_t = softplus(W_β [ĥ_t ∥ ê_{y_t}] + b_β)
             # b_β=20 → 初始时 softplus(20)≈20 → a_t=1-H/21 ≥ 0.95
             # 形状：推理 (batch,1,1)，训练 (N,1)，广播兼容 H
-            beta = nn.functional.softplus(
+            beta_t = nn.functional.softplus(
                 self.thinking_residual_gate_beta(gate_r_input)
             )
-            b_t = H / (beta + 1)
+            b_t = H / (beta_t + 1)
             a_t = 1 - b_t
         else:
             a_t = self.thinking_residual_Lambda(r_t)
             b_t = torch.sqrt(1 - a_t.pow(2) + eps)
+            beta_t = None
 
         discrete_thinking = a_t * embeds
         continuous_thinking = b_t * (residual)
@@ -643,7 +644,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
                 self._continuous_norm = continuous_norm.item()
                 self._thinking_norm_ratio = continuous_norm.item() / total_norm.item()
 
-        return discrete_thinking + continuous_thinking, a_t
+        return discrete_thinking + continuous_thinking, a_t, beta_t
 
 
 

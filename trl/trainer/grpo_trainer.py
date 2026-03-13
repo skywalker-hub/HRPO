@@ -565,7 +565,7 @@ class GRPOTrainer(Trainer):
             # 前向1
             ##已确认训练经过，此处开始多端口。生成第一次前向，这里生成多组回答。
             with unwrap_model_for_generation(self.model, self.accelerator) as unwrapped_model:
-                prompt_completion_ids, thinking_embeds, thinking_mask, embeds_ratio, saved_last_hs, token_probs, token_entropies, saved_last_entropy = unwrapped_model.generate(
+                prompt_completion_ids, thinking_embeds, thinking_mask, embeds_ratio, saved_last_hs, token_probs, token_entropies, saved_last_entropy, saved_beta = unwrapped_model.generate(
                     prompt_ids, attention_mask=prompt_mask, 
                     generation_config=self.generation_config,
                     processing_class=self.processing_class,
@@ -697,6 +697,7 @@ class GRPOTrainer(Trainer):
             "embeds_ratio": embeds_ratio,
             "saved_last_hs": saved_last_hs,
             "saved_last_entropy": saved_last_entropy,
+            "saved_beta": saved_beta,
             "token_probs": token_probs,           # 每个生成位置选中 token 的概率
             "token_entropies": token_entropies,    # 每个生成位置的分布熵
             "ref_per_token_logps": ref_per_token_logps,

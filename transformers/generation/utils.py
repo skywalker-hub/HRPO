@@ -3303,6 +3303,7 @@ class GenerationMixin:
         last_entropy_list = [
             torch.zeros(input_ids.shape[0], input_ids.shape[1], device=input_ids.device)
         ] if return_thinking_embeds else []
+        beta_list = [] if return_thinking_embeds else []
 
         # 逐位置记录：选中 token 的概率 & 分布熵（训练和推理均可用）
         token_probs_list = []       # 每步 append shape (batch_size,)
@@ -3454,6 +3455,10 @@ class GenerationMixin:
                     last_entropy_list.append(_last_entropy_used_this_step.unsqueeze(-1))
                 else:
                     last_entropy_list.append(torch.zeros(input_ids.shape[0], 1, device=input_ids.device))
+                if len(outputs.hidden_states) > 5 and outputs.hidden_states[5] is not None:
+                    beta_list.append(outputs.hidden_states[5].unsqueeze(-1))
+                else:
+                    beta_list.append(torch.zeros(input_ids.shape[0], 1, device=input_ids.device))
 
             unfinished_sequences = unfinished_sequences & ~stopping_criteria(input_ids, scores)
             this_peer_finished = unfinished_sequences.max() == 0
@@ -3510,11 +3515,13 @@ class GenerationMixin:
                 )
                 last_hs_list.append(torch.zeros_like(thinking_embeds[-1]))
                 last_entropy_list.append(torch.zeros(input_ids.shape[0], 1, device=input_ids.device))
+                beta_list.append(torch.zeros(input_ids.shape[0], 1, device=input_ids.device))
                 # 拼接逐位置指标，追加在 tuple 末尾返回
                 _token_probs = torch.stack(token_probs_list, dim=1) if token_probs_list else torch.zeros(input_ids.shape[0], 0, device=input_ids.device)
                 _token_entropies = torch.stack(token_entropies_list, dim=1) if token_entropies_list else torch.zeros(input_ids.shape[0], 0, device=input_ids.device)
                 _saved_last_entropy = torch.cat(last_entropy_list, dim=1) if last_entropy_list else torch.zeros(input_ids.shape[0], 0, device=input_ids.device)
-                return input_ids, torch.cat(thinking_embeds, dim=1), torch.cat(thinking_mask, dim=1), torch.cat(embeds_ratio, dim=1), torch.cat(last_hs_list, dim=1), _token_probs, _token_entropies, _saved_last_entropy
+                _saved_beta = torch.cat(beta_list, dim=1) if beta_list else torch.zeros(input_ids.shape[0], 0, device=input_ids.device)
+                return input_ids, torch.cat(thinking_embeds, dim=1), torch.cat(thinking_mask, dim=1), torch.cat(embeds_ratio, dim=1), torch.cat(last_hs_list, dim=1), _token_probs, _token_entropies, _saved_last_entropy, _saved_beta
             else:
                 return input_ids
 
