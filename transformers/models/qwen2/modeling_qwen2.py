@@ -561,9 +561,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
             new_embeds: 混合后的嵌入向量
             a_t: 衰减系数
         """
-        r_t = torch.sigmoid(self.thinking_residual_gate_r(residual))
-        i_t = torch.sigmoid(self.thinking_residual_gate_i(residual))  # 保留 i_t 定义，但不再使用
-        a_t = self.thinking_residual_Lambda(r_t)
+        
         
         # ★ 关键修复：对 residual 做 RMSNorm 归一化后再送入 head
         # 原因：residual 是 Transformer 隐藏状态，范数可达数百~数千，
@@ -573,6 +571,9 @@ class Qwen2Model(Qwen2PreTrainedModel):
         residual_normed = residual * torch.rsqrt(residual_variance + eps)
         h_residual = self.thinking_residual_head(residual_normed.to(residual.dtype))  # 连续信息向量
 
+        r_t = torch.sigmoid(self.thinking_residual_gate_r(residual))
+        i_t = torch.sigmoid(self.thinking_residual_gate_i(residual))  # 保留 i_t 定义，但不再使用
+        a_t = self.thinking_residual_Lambda(r_t)
 
         # 新增：基于 token ID 的离散门控
         # g_k = sigmoid(lookup(k))，形状 (batch, seq_len, hidden_size)
