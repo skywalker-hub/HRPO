@@ -41,86 +41,86 @@ def main(args):
             "gate_proj", "up_proj", "down_proj",
         ],
         modules_to_save = [
-            "thinking_residual_gate_r",
-            "thinking_residual_gate_i",
-            "thinking_residual_Lambda",
-            "thinking_residual_head",  # 新增: 隐状态变换头
-            "token_gate_matrix",  # 新增: Token 门控矩阵
+            "thinking_residual_decay",
+            "thinking_residual_head",
+            "token_gate_matrix",
         ], 
         lora_alpha = args.lora_rank * 2,
         use_gradient_checkpointing = "unsloth",
         random_state = args.seed,
     )
-    model.model.model.thinking_residual_Lambda.reset_lambda_parameters(
-        r_min = args.residual_r_min, r_max = args.residual_r_max,
-    )
-    
+
     # ============ 【真正生效的初始化】 ============
-    # 注意：模型定义中的初始化会被 post_init() 覆盖，PEFT 包装后需要初始化 modules_to_save.default
-    # 这里才是真正决定训练初始值的地方！
+    # post_init() 会覆盖模型定义中的初始化，PEFT 包装后需要重新初始化 modules_to_save.default
     import torch.nn as nn
-    
-    # 获取真正可训练的权重（PEFT 包装后是 modules_to_save.default.weight）
+
+    # --- thinking_residual_decay: Lambda 初始化 + proj 零初始化 ---
+    decay_module = model.model.model.thinking_residual_decay
+    if hasattr(decay_module, 'modules_to_save'):
+        decay_inner = decay_module.modules_to_save.default
+    else:
+        decay_inner = decay_module
+    # Lambda: 通过 sigmoid 反函数映射到目标初值范围
+    with torch.no_grad():
+        nn.init.uniform_(decay_inner.Lambda, a=args.residual_r_min, b=args.residual_r_max)
+        decay_inner.Lambda.data.copy_(torch.log(decay_inner.Lambda / (1.0 - decay_inner.Lambda)))
+    # proj: 零初始化，保证训练初期 a_t 仅由 Lambda 决定
+    nn.init.zeros_(decay_inner.proj.weight)
+
+    # --- thinking_residual_head: 零初始化 ---
     head_module = model.model.model.thinking_residual_head
-    gate_module = model.model.model.token_gate_matrix
-    
     if hasattr(head_module, 'modules_to_save'):
         head_trainable_weight = head_module.modules_to_save.default.weight
     else:
         head_trainable_weight = head_module.weight
-    
+    nn.init.zeros_(head_trainable_weight)
+
+    # --- token_gate_matrix: 常数初始化 ---
+    gate_module = model.model.model.token_gate_matrix
     if hasattr(gate_module, 'modules_to_save'):
         gate_trainable_weight = gate_module.modules_to_save.default.weight
     else:
         gate_trainable_weight = gate_module.weight
-    
-    # ★★★ 真正生效的初始化 ★★★
-    nn.init.zeros_(head_trainable_weight)  # thinking_residual_head: 初始化为 0
+    token_gate_init = -2.0
+    nn.init.constant_(gate_trainable_weight, token_gate_init)
 
-    ###门控初始化/监控
-    token_gate_init = -2.0  # 只在这里控制 gate 初始化值（文件名/检查都引用该值）
-    nn.init.constant_(gate_trainable_weight, token_gate_init)  # token_gate_matrix: 初始化为 -3, sigmoid(-3)≈0.047
-    # ★★★ 修改上面的值来改变初始化 ★★★
-    
-    print(f"\n初始化完成:")
-    print(f"  thinking_residual_head: 使用 {'modules_to_save.default' if hasattr(head_module, 'modules_to_save') else 'weight'}")
-    print(f"  token_gate_matrix: 使用 {'modules_to_save.default' if hasattr(gate_module, 'modules_to_save') else 'weight'}")
-
-    ###保存文件名（init 统一使用上面 token_gate_init）
-    exp_name = (f"./main319.1.1/{args.model_name.split('/')[-1]}-gsm8k-group{args.group_size}"
+    # --- 保存文件名 ---
+    exp_name = (f"./main319.2.0/{args.model_name.split('/')[-1]}-gsm8k-group{args.group_size}"
                 f"-lora{args.lora_rank}-lr{args.lr_token_gate_matrix}-init{token_gate_init:g}"
                 f"-rmin{args.residual_r_min}-temp{args.temperature}")
     if os.path.exists(exp_name) and len(os.listdir(exp_name)) > 0:
         print(f"Experiment {exp_name} already exists. Exiting...")
         exit()
 
-    # ============ 打印新加入矩阵的初始值情况 ============
+    # ============ 打印初始值检查 ============
     print("\n" + "=" * 60)
-    print("HRPO 新增模块初始值检查")
+    print("HRPO 模块初始值检查")
     print("=" * 60)
-    
-    # 1. thinking_residual_head 初始值（期望全为 0）
-    head_weight = head_trainable_weight.data
+
+    lambda_data = decay_inner.Lambda.data
+    sigmoid_lambda = torch.sigmoid(lambda_data)
+    print(f"\n[thinking_residual_decay.Lambda]")
+    print(f"  形状: {lambda_data.shape}")
+    print(f"  原始值范围: [{lambda_data.min().item():.4f}, {lambda_data.max().item():.4f}]")
+    print(f"  sigmoid(Lambda) 范围: [{sigmoid_lambda.min().item():.6f}, {sigmoid_lambda.max().item():.6f}]")
+    print(f"  (期望初始 a_t 在 [{args.residual_r_min}, {args.residual_r_max}])")
+
+    proj_weight = decay_inner.proj.weight.data
+    print(f"\n[thinking_residual_decay.proj]")
+    print(f"  形状: {proj_weight.shape}")
+    print(f"  是否全为0: {(proj_weight == 0).all().item()}")
+
     print(f"\n[thinking_residual_head]")
-    print(f"  形状: {head_weight.shape}")
-    print(f"  最小值: {head_weight.min().item():.6f}")
-    print(f"  最大值: {head_weight.max().item():.6f}")
-    print(f"  均值: {head_weight.mean().item():.6f}")
-    print(f"  是否全为0: {(head_weight == 0).all().item()}")
-    
-    # 2. token_gate_matrix 初始值（期望）
+    print(f"  形状: {head_trainable_weight.data.shape}")
+    print(f"  是否全为0: {(head_trainable_weight.data == 0).all().item()}")
+
     gate_weight = gate_trainable_weight.data
     print(f"\n[token_gate_matrix]")
     print(f"  形状: {gate_weight.shape}")
-    print(f"  最小值: {gate_weight.min().item():.6f}")
-    print(f"  最大值: {gate_weight.max().item():.6f}")
     print(f"  均值: {gate_weight.mean().item():.6f}")
-    expected_gate = torch.full_like(gate_weight, float(token_gate_init))
-    print(f"  是否全为{token_gate_init:g}: {torch.allclose(gate_weight, expected_gate)}")
     print(f"  sigmoid后的值范围: [{torch.sigmoid(gate_weight).min().item():.6f}, {torch.sigmoid(gate_weight).max().item():.6f}]")
-    
+
     print("=" * 60 + "\n")
-    # ============ 初始值检查结束 ============
 
     training_args = GRPOConfig(
         use_vllm = False,
@@ -161,10 +161,10 @@ def main(args):
     )
     patch_trainer_optimizer(
         trainer,
-        args.lr_residual_gate,
-        args.lr_residual_Lambda,
-        args.lr_residual_head,  # 新增: 隐状态变换头的学习率
-        args.lr_token_gate_matrix,  # 新增: Token 门控矩阵的学习率
+        args.lr_residual_decay,
+        args.lr_residual_decay,  # 兼容旧参数位置
+        args.lr_residual_head,
+        args.lr_token_gate_matrix,
     )
     
     # ============ 调试：检查 token_gate_matrix 是否被正确加入优化器 ============
@@ -211,8 +211,7 @@ if __name__ == "__main__":
     parser.add_argument("--beta", type=float, default=0.005)
     parser.add_argument("--residual_r_min", type=float, default=0.981)
     parser.add_argument("--residual_r_max", type=float, default=0.999)
-    parser.add_argument("--lr_residual_gate", type=float, default=1e-4)
-    parser.add_argument("--lr_residual_Lambda", type=float, default=1e-3)
+    parser.add_argument("--lr_residual_decay", type=float, default=1e-4)
 
     # 新增: 隐状态变换头的学习率
     parser.add_argument("--lr_residual_head", type=float, default=1e-4)  

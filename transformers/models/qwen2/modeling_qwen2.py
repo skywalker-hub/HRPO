@@ -466,27 +466,31 @@ QWEN2_INPUTS_DOCSTRING = r"""
 """
 
 
-############## HRPO 参数lamda参与计算处
-class ThinkingResidualLambda(nn.Module):
-    c = 8.0
+############## 自适应衰减模块：输入条件化的 Sigmoid 衰减
+class ThinkingResidualDecay(nn.Module):
+    """
+    a_t = sigmoid(lambda + W_a * RMSNorm(h_t))
+
+    - lambda: 可学习偏置向量，控制初始衰减范围
+    - W_a: 可学习投影，初始化为零，使训练初期 a_t 仅由 lambda 决定
+    - 随训练推进，W_a 从零逐渐学到非零值，a_t 开始根据隐藏状态内容动态调节
+    """
 
     def __init__(self, config: Qwen2Config):
         super().__init__()
         self.Lambda = nn.Parameter(torch.randn(config.hidden_size))
+        self.proj = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
+        nn.init.zeros_(self.proj.weight)
 
-    def reset_lambda_parameters(
-            self, r_min=0.9, r_max=0.999
-        ):
+    def reset_lambda_parameters(self, r_min=0.9, r_max=0.999):
         with torch.no_grad():
             nn.init.uniform_(self.Lambda, a=r_min, b=r_max)
-            self.Lambda.data.copy_(
-                - torch.log((self.Lambda ** (-1. / self.c) ) - 1)
-            )
+            # sigmoid^{-1}(r) = ln(r / (1 - r))
+            self.Lambda.data.copy_(torch.log(self.Lambda / (1.0 - self.Lambda)))
 
-    def forward(self, r_t):
-        a_t = torch.exp(
-            - self.c * nn.functional.softplus(-self.Lambda, beta=1, threshold=20) * r_t
-        )
+    def forward(self, h_normed):
+        # h_normed: 已经过 RMSNorm 的隐藏状态
+        a_t = torch.sigmoid(self.Lambda + self.proj(h_normed))
         return a_t
 
 
@@ -515,10 +519,8 @@ class Qwen2Model(Qwen2PreTrainedModel):
         self.rotary_emb = Qwen2RotaryEmbedding(config=config)
         self.gradient_checkpointing = False
 
-        ############## HRPO 核心模块定义处  
-        self.thinking_residual_gate_r = nn.Linear(config.hidden_size, config.hidden_size)
-        self.thinking_residual_gate_i = nn.Linear(config.hidden_size, config.hidden_size)
-        self.thinking_residual_Lambda = ThinkingResidualLambda(config)
+        ############## HRPO 核心模块定义处
+        self.thinking_residual_decay = ThinkingResidualDecay(config)
         
         # 新增：隐状态变换头，将原始隐状态投影到 thinking residual 空间
         # 形状选择说明：
@@ -550,62 +552,54 @@ class Qwen2Model(Qwen2PreTrainedModel):
     def thinking_residual(self, embeds, residual, input_ids=None, eps=1e-8):
         """
         混合推理残差计算函数
-        
+
         Args:
             embeds: 当前 token 的嵌入向量 (batch, seq_len, hidden_size)
             residual: 上一步的隐藏状态 (batch, seq_len, hidden_size)
             input_ids: 当前 token 的 ID (batch, seq_len)，用于查询门控矩阵
             eps: 数值稳定性参数
-        
+
         Returns:
             new_embeds: 混合后的嵌入向量
             a_t: 衰减系数
         """
-        r_t = torch.sigmoid(self.thinking_residual_gate_r(residual))
-        i_t = torch.sigmoid(self.thinking_residual_gate_i(residual))  # 保留 i_t 定义，但不再使用
-        a_t = self.thinking_residual_Lambda(r_t)
-        
-        # ★ 关键修复：对 residual 做 RMSNorm 归一化后再送入 head
-        # 原因：residual 是 Transformer 隐藏状态，范数可达数百~数千，
-        # 导致 ∂L/∂W = grad^T × residual 中梯度被 ||residual|| 放大。
-        # 归一化后 ||residual_normed|| ≈ 1，梯度范数仅取决于 upstream grad。
+        # RMSNorm 归一化隐藏状态（共享给 decay 和 head 两个模块）
         residual_variance = residual.to(torch.float32).pow(2).mean(-1, keepdim=True)
         residual_normed = residual * torch.rsqrt(residual_variance + eps)
-        h_residual = self.thinking_residual_head(residual_normed.to(residual.dtype))  # 连续信息向量
+        residual_normed = residual_normed.to(residual.dtype)
 
+        # 自适应衰减系数：a_t = sigmoid(lambda + W_a * RMSNorm(h_t))
+        a_t = self.thinking_residual_decay(residual_normed)
 
-        # 新增：基于 token ID 的离散门控
-        # g_k = sigmoid(lookup(k))，形状 (batch, seq_len, hidden_size)
+        # 连续信息向量：对归一化后的隐藏状态做线性投影
+        h_residual = self.thinking_residual_head(residual_normed)
+
+        # 基于 token ID 的离散门控
         if input_ids is not None:
-            # Debug: record if input_ids is passed (print once in training mode)
             if self.training and not hasattr(self, '_gate_debug_printed'):
                 print(f"\n[DEBUG] token_gate_matrix called!")
                 print(f"  input_ids shape: {input_ids.shape}")
                 print(f"  input_ids sample: {input_ids.flatten()[:10].tolist()}")
                 self._gate_debug_printed = True
-            
-            gate_logits = self.token_gate_matrix(input_ids)  # (batch, seq_len, hidden_size)
+
+            gate_logits = self.token_gate_matrix(input_ids)
             g_k = torch.sigmoid(gate_logits)
         else:
-            # Debug: if input_ids is None
             if self.training and not hasattr(self, '_gate_none_debug_printed'):
                 print(f"\n[WARNING] token_gate_matrix NOT called! input_ids is None")
                 self._gate_none_debug_printed = True
-            # 如果没有提供 input_ids，回退到全 1 门控（相当于不过滤）
             g_k = torch.ones_like(h_residual)
-        
-        # continuous_bias = h_residual * g_k，替代原来的 i_t * h_residual
+
         continuous_bias = h_residual * g_k
-        
+
+        # 球面插值混合
         discrete_thinking = a_t * embeds
         continuous_thinking = torch.sqrt(1 - a_t.pow(2) + eps) * continuous_bias
 
-        # 监控：计算离散/连续思维的模值比例（detach 避免影响梯度）
         if self.training:
             with torch.no_grad():
                 discrete_norm = discrete_thinking.detach().norm(dim=-1).mean()
                 continuous_norm = continuous_thinking.detach().norm(dim=-1).mean()
-                # 比例: discrete / (discrete + continuous)，值域 [0, 1]
                 total_norm = discrete_norm + continuous_norm + eps
                 self._discrete_norm = discrete_norm.item()
                 self._continuous_norm = continuous_norm.item()

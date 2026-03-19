@@ -2495,20 +2495,12 @@ class FastLlamaModel:
                 new_dtype = model.get_input_embeddings().modules_to_save.default.weight.dtype
 
             for module in modules_to_save:
-                if "thinking_residual_gate_r" in module:
-                    assert(hasattr(model.model.model.thinking_residual_gate_r, "modules_to_save"))
-                    model.model.model.thinking_residual_gate_r.modules_to_save.default\
-                        .to(device = "cuda", dtype = new_dtype, non_blocking = True)
-                    model.model.model.thinking_residual_gate_r.modules_to_save.default.requires_grad_(True)
-                if "thinking_residual_gate_i" in module:
-                    assert(hasattr(model.model.model.thinking_residual_gate_i, "modules_to_save"))
-                    model.model.model.thinking_residual_gate_i.modules_to_save.default\
-                        .to(device = "cuda", dtype = new_dtype, non_blocking = True)
-                    model.model.model.thinking_residual_gate_i.modules_to_save.default.requires_grad_(True)
-                if "thinking_residual_Lambda" in module:
-                    model.model.model.thinking_residual_Lambda.modules_to_save.default\
+                if "thinking_residual_decay" in module:
+                    assert(hasattr(model.model.model.thinking_residual_decay, "modules_to_save"))
+                    # Lambda 保持 float32 精度
+                    model.model.model.thinking_residual_decay.modules_to_save.default\
                         .to(device = "cuda", dtype = torch.float32, non_blocking = True)
-                    model.model.model.thinking_residual_Lambda.modules_to_save.default.requires_grad_(True)
+                    model.model.model.thinking_residual_decay.modules_to_save.default.requires_grad_(True)
                 if "thinking_residual_head" in module:
                     assert(hasattr(model.model.model.thinking_residual_head, "modules_to_save"))
                     model.model.model.thinking_residual_head.modules_to_save.default\
