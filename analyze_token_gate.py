@@ -10,7 +10,7 @@ import os
 
 # ============ 配置区域 ============
 # 修改为你的 checkpoint 路径
-CHECKPOINT_PATH = "./test0116.2.5.0/Qwen2.5-1.5B-Instruct-gsm8k-group4-lora32-lr0.01-init-2-rmin0.981-temp0.5/checkpoint-934"
+CHECKPOINT_PATH = "./test0116.5.0/Qwen2.5-1.5B-Instruct-gsm8k-group4-lora32-lr0.01-init-2-rmin0.981-temp0.5/checkpoint-934"
 MODEL_NAME = "/root/autodl-tmp/models/Qwen2.5-1.5B-Instruct"  # 或 "Qwen/Qwen2.5-1.5B-Instruct"
 INIT_VALUE = -2.0  # 初始化值（改为 -2.0 了）
 # =================================
@@ -215,11 +215,43 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
             print(f"    raw (first 10 dims): {[f'{v:.4f}' for v in gate_vec[:10].tolist()]}")
             print(f"    sigmoid (first 10 dims): {[f'{v:.4f}' for v in sigmoid_vec[:10].tolist()]}")
     
+    # 11. 每行最大值分析（单维度最大门控开度 & 尖刺检测）
+    row_max_raw, row_max_dim = gate_weight.max(dim=1)  # 每行 raw 最大值及其维度索引
+    row_sigmoid_max = torch.sigmoid(gate_weight).max(dim=1).values
+    row_spike = row_max_raw - row_mean  # 尖刺度：最大值与均值之差
+
+    print(f"\n[10a. Top 20 tokens by row_max] (largest single-dim gate value)")
+    print(f"{'Token ID':>10} | {'Token':>20} | {'RowMax':>10} | {'MaxDim':>6} | {'SigMax':>10} | {'RowMean':>10} | {'Spike':>10}")
+    print("-" * 90)
+    top_max = row_max_raw.topk(20)
+    for idx, val in zip(top_max.indices, top_max.values):
+        tid = idx.item()
+        try:
+            ts = tokenizer.decode([tid]).replace('\n', '\\n')
+        except:
+            ts = "<UNK>"
+        print(f"{tid:>10} | {ts:>20} | {val.item():>10.6f} | {row_max_dim[tid].item():>6} | {row_sigmoid_max[tid].item():>10.6f} | {row_mean[tid].item():>10.6f} | {row_spike[tid].item():>10.6f}")
+
+    print(f"\n[10b. Top 20 tokens by spike] (row_max - row_mean, single-dim outlier)")
+    print(f"{'Token ID':>10} | {'Token':>20} | {'Spike':>10} | {'RowMax':>10} | {'MaxDim':>6} | {'RowMean':>10} | {'Std':>10}")
+    print("-" * 90)
+    top_spike = row_spike.topk(20)
+    for idx, val in zip(top_spike.indices, top_spike.values):
+        tid = idx.item()
+        try:
+            ts = tokenizer.decode([tid]).replace('\n', '\\n')
+        except:
+            ts = "<UNK>"
+        print(f"{tid:>10} | {ts:>20} | {val.item():>10.6f} | {row_max_raw[tid].item():>10.6f} | {row_max_dim[tid].item():>6} | {row_mean[tid].item():>10.6f} | {row_std[tid].item():>10.6f}")
+
     return {
         'row_mean': row_mean,
         'row_std': row_std,
         'row_sigmoid_mean': row_sigmoid_mean,
         'delta_from_init': delta_from_init,
+        'row_max_raw': row_max_raw,
+        'row_sigmoid_max': row_sigmoid_max,
+        'row_spike': row_spike,
     }
 
 
