@@ -75,7 +75,7 @@ def main(args):
         gate_trainable_weight = gate_module.weight
     
     # ★★★ 真正生效的初始化 ★★★
-    nn.init.zeros_(head_trainable_weight)  # thinking_residual_head: 初始化为 0
+    nn.init.xavier_uniform_(head_trainable_weight, gain=0.01) # thinking_residual_head: 初始化为 0
 
     ###门控初始化/监控
     token_gate_init = -2.0  # 只在这里控制 gate 初始化值（文件名/检查都引用该值）
