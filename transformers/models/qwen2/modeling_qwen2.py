@@ -571,7 +571,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
         residual_normed = residual * torch.rsqrt(residual_variance + eps)
         h_residual = self.thinking_residual_head(residual_normed.to(residual.dtype))  # 连续信息向量
 
-        r_t = torch.sigmoid(self.thinking_residual_gate_r(rh_residual))
+        r_t = torch.sigmoid(self.thinking_residual_gate_r(h_residual))
         i_t = torch.sigmoid(self.thinking_residual_gate_i(residual))  # 保留 i_t 定义，但不再使用
         a_t = self.thinking_residual_Lambda(r_t)
 
