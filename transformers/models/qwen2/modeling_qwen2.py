@@ -571,7 +571,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
         residual_normed = residual * torch.rsqrt(residual_variance + eps)
         h_residual = self.thinking_residual_head(residual_normed.to(residual.dtype))  # 连续信息向量
 
-        r_t = torch.sigmoid(self.thinking_residual_gate_r(h_residual))
+        r_t = torch.sigmoid(self.thinking_residual_gate_r(residual))
         i_t = torch.sigmoid(self.thinking_residual_gate_i(residual))  # 保留 i_t 定义，但不再使用
         a_t = self.thinking_residual_Lambda(r_t)
 
@@ -593,10 +593,10 @@ class Qwen2Model(Qwen2PreTrainedModel):
                 print(f"\n[WARNING] token_gate_matrix NOT called! input_ids is None")
                 self._gate_none_debug_printed = True
             # 如果没有提供 input_ids，回退到全 1 门控（相当于不过滤）
-            g_k = torch.ones_like(h_residual)
+            g_k = torch.ones_like(residual)
         
         # continuous_bias = h_residual * g_k，替代原来的 i_t * h_residual
-        continuous_bias = h_residual * g_k
+        continuous_bias = residual * g_k
         
         discrete_thinking = a_t * embeds
         continuous_thinking = torch.sqrt(1 - a_t.pow(2) + eps) * continuous_bias
