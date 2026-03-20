@@ -4,14 +4,60 @@ from unsloth import FastLanguageModel, PatchFastRL
 PatchFastRL("GRPO", FastLanguageModel)
 
 import os
+import math
 import argparse
 import torch
 from trl import GRPOConfig, GRPOTrainer
+from transformers import TrainerCallback
 from datasets import load_dataset, Dataset
 from patch import patch_trainer_optimizer
 from utils import *
 
 os.environ["WANDB_PROJECT"] = "latent-reasoning"
+
+
+class GateCosineScheduleCallback(TrainerCallback):
+    """
+    为 token_gate_matrix 提供独立的 warmup + 保持 + cosine 退火。
+    gate_warmup_ratio:  warmup 占总步数的比例
+    gate_decay_ratio:   cosine 衰减从总步数的多少比例处开始（之前保持峰值 lr）
+    """
+    def __init__(self, gate_warmup_ratio=0.1, gate_decay_ratio=0.5):
+        self.gate_warmup_ratio = gate_warmup_ratio
+        self.gate_decay_ratio = gate_decay_ratio
+        self.gate_base_lr = None
+        self.gate_group_idx = None
+
+    def _find_gate_group(self, optimizer):
+        if self.gate_group_idx is not None:
+            return self.gate_group_idx
+        for i, group in enumerate(optimizer.param_groups):
+            if group.get("_is_token_gate", False):
+                self.gate_group_idx = i
+                self.gate_base_lr = group["lr"]
+                return i
+        return None
+
+    def on_step_begin(self, args, state, control, model=None, optimizer=None, **kwargs):
+        if optimizer is None:
+            return
+        idx = self._find_gate_group(optimizer)
+        if idx is None:
+            return
+
+        step = state.global_step
+        total = state.max_steps
+        warmup_end = int(total * self.gate_warmup_ratio)
+        decay_start = int(total * self.gate_decay_ratio)
+        group = optimizer.param_groups[idx]
+
+        if step < warmup_end:
+            group["lr"] = self.gate_base_lr * step / max(warmup_end, 1)
+        elif step < decay_start:
+            group["lr"] = self.gate_base_lr
+        else:
+            progress = (step - decay_start) / max(total - decay_start, 1)
+            group["lr"] = self.gate_base_lr * 0.5 * (1.0 + math.cos(math.pi * progress))
 
 
 def preprocess_gsm8k(split="train", chunk_size=1000) -> Dataset:
@@ -158,6 +204,10 @@ def main(args):
         ],
         args = training_args,
         train_dataset = dataset,
+        callbacks=[GateCosineScheduleCallback(
+            gate_warmup_ratio=args.gate_warmup_ratio,
+            gate_decay_ratio=args.gate_decay_ratio,
+        )],
     )
     patch_trainer_optimizer(
         trainer,
@@ -217,7 +267,10 @@ if __name__ == "__main__":
     # 新增: 隐状态变换头的学习率
     parser.add_argument("--lr_residual_head", type=float, default=1e-4)  
     # 新增: Token 门控矩阵的学习率 (提高以克服bfloat16精度问题)
-    parser.add_argument("--lr_token_gate_matrix", type=float, default=1e-2)  
+    parser.add_argument("--lr_token_gate_matrix", type=float, default=1e-2)
+    # gate 独立调度
+    parser.add_argument("--gate_warmup_ratio", type=float, default=0.1)
+    parser.add_argument("--gate_decay_ratio", type=float, default=0.7)
     
     parser.add_argument("--weight_decay", type=float, default=0.1)
     parser.add_argument("--warmup_ratio", type=float, default=0.1)

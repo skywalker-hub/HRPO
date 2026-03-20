@@ -74,13 +74,14 @@ def patch_trainer_optimizer(trainer, lr_thinking_residual_gate=1e-4, thinking_re
                     "lr": lr_thinking_residual_head,
                     "weight_decay": self.args.weight_decay,
                 },
-                # 新增: token_gate_matrix 参数组
+                # 新增: token_gate_matrix 参数组（_is_token_gate 供 Callback 识别）
                 {
                     "params": [
                         p for n, p in opt_model.named_parameters() if ("token_gate_matrix" in n and p.requires_grad)
                     ],
                     "lr": lr_token_gate_matrix,
                     "weight_decay": self.args.weight_decay,
+                    "_is_token_gate": True,
                 },
             ]
 
