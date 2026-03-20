@@ -83,11 +83,11 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
     print(f"{'='*60}")
     
     # 1. 基本统计
-    print(f"\n[1. Overall stats]")
-    print(f"  Mean: {gate_weight.mean().item():.6f}")
-    print(f"  Std: {gate_weight.std().item():.6f}")
-    print(f"  Min: {gate_weight.min().item():.6f}")
-    print(f"  Max: {gate_weight.max().item():.6f}")
+    print(f"\n[1. 全局统计]")
+    print(f"  均值: {gate_weight.mean().item():.6f}")
+    print(f"  标准差: {gate_weight.std().item():.6f}")
+    print(f"  最小值: {gate_weight.min().item():.6f}")
+    print(f"  最大值: {gate_weight.max().item():.6f}")
     
     # 2. 计算每行（每个 token）的统计
     row_mean = gate_weight.mean(dim=1)  # 每个 token 的门控均值
@@ -98,9 +98,9 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
     delta_from_init = (gate_weight - init_value).abs().mean(dim=1)  # 每个 token 偏离初始值的程度
     
     # 4. 找出变化最大的 token
-    print(f"\n[2. Top 20 most changed tokens] (largest deviation from init {init_value})")
+    print(f"\n[2. 偏离初始值最大的 Top 100 token] (初始值={init_value})")
     top_changed = delta_from_init.topk(100)
-    print(f"{'Token ID':>10} | {'Token':>20} | {'Deviation':>10} | {'Mean':>10} | {'SigmoidMean':>12}")
+    print(f"{'Token ID':>10} | {'Token':>20} | {'偏离度':>10} | {'行均值':>10} | {'Sigmoid均值':>12}")
     print("-" * 70)
     for idx, delta in zip(top_changed.indices, top_changed.values):
         token_id = idx.item()
@@ -113,9 +113,9 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
         print(f"{token_id:>10} | {token_str:>20} | {delta.item():>10.6f} | {mean_val:>10.6f} | {sigmoid_val:>12.6f}")
     
     # 5. 找出门控最开放的 token（sigmoid 最大）
-    print(f"\n[3. Top 20 most open tokens] (largest sigmoid mean)")
+    print(f"\n[3. 门控最开放的 Top 20 token] (Sigmoid均值最大)")
     top_open = row_sigmoid_mean.topk(20)
-    print(f"{'Token ID':>10} | {'Token':>20} | {'SigmoidMean':>12} | {'RawMean':>10}")
+    print(f"{'Token ID':>10} | {'Token':>20} | {'Sigmoid均值':>12} | {'原始均值':>10}")
     print("-" * 60)
     for idx, val in zip(top_open.indices, top_open.values):
         token_id = idx.item()
@@ -127,9 +127,9 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
         print(f"{token_id:>10} | {token_str:>20} | {val.item():>12.6f} | {mean_val:>10.6f}")
     
     # 6. 找出门控最关闭的 token（sigmoid 最小）
-    print(f"\n[4. Top 20 most closed tokens] (smallest sigmoid mean)")
+    print(f"\n[4. 门控最关闭的 Top 20 token] (Sigmoid均值最小)")
     bottom_closed = row_sigmoid_mean.topk(20, largest=False)
-    print(f"{'Token ID':>10} | {'Token':>20} | {'SigmoidMean':>12} | {'RawMean':>10}")
+    print(f"{'Token ID':>10} | {'Token':>20} | {'Sigmoid均值':>12} | {'原始均值':>10}")
     print("-" * 60)
     for idx, val in zip(bottom_closed.indices, bottom_closed.values):
         token_id = idx.item()
@@ -141,7 +141,7 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
         print(f"{token_id:>10} | {token_str:>20} | {val.item():>12.6f} | {mean_val:>10.6f}")
     
     # 7. 分析特定类型的 token
-    print(f"\n[5. Specific token type analysis]")
+    print(f"\n[5. 特定类型 token 分析]")
     
     # 数字 token
     digit_tokens = []
@@ -181,8 +181,8 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
     # 8. 统计有多少 token 发生了显著变化
     threshold = 0.01  # 偏离阈值
     changed_count = (delta_from_init > threshold).sum().item()
-    print(f"\n[6. Change statistics]")
-    print(f"  Tokens with deviation > {threshold}: {changed_count} / {vocab_size} ({100*changed_count/vocab_size:.2f}%)")
+    print(f"\n[6. 变化统计]")
+    print(f"  偏离度 > {threshold} 的 token 数: {changed_count} / {vocab_size} ({100*changed_count/vocab_size:.2f}%)")
     
     # 9. 输出变化最大的 token 的每个维度的数值和 sigmoid 值
     most_changed_idx = delta_from_init.argmax().item()
@@ -192,10 +192,10 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
         most_changed_token_str = "<UNK>"
     most_changed_raw = gate_weight[most_changed_idx]
     most_changed_sigmoid = torch.sigmoid(most_changed_raw)
-    print(f"\n[8. Most changed token - all dimensions]")
-    print(f"  Token: '{most_changed_token_str}' (id={most_changed_idx}), deviation={delta_from_init[most_changed_idx].item():.6f}")
-    print(f"  Total dims: {hidden_size}")
-    print(f"  {'Dim':>6} | {'Raw':>12} | {'Sigmoid':>12}")
+    print(f"\n[8. 变化最大的 token — 所有维度展开]")
+    print(f"  Token: '{most_changed_token_str}' (id={most_changed_idx}), 偏离度={delta_from_init[most_changed_idx].item():.6f}")
+    print(f"  总维度数: {hidden_size}")
+    print(f"  {'维度':>6} | {'原始值':>12} | {'Sigmoid':>12}")
     print(f"  {'-'*36}")
     for dim_idx in range(hidden_size):
         raw_val = most_changed_raw[dim_idx].item()
@@ -203,7 +203,7 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
         print(f"  {dim_idx:>6} | {raw_val:>12.6f} | {sig_val:>12.6f}")
     
     # 10. 打印指定 token 的详细门控向量
-    print(f"\n[9. Detailed gate vectors for selected tokens (first 20 dims)]")
+    print(f"\n[9. 指定 token 的门控向量详情 (前 20 维)]")
     sample_tokens = ['0', '1', '2', '+', '-', '=', 'the', 'answer', '\n']
     for token_str in sample_tokens:
         tokens = tokenizer.encode(token_str, add_special_tokens=False)
@@ -222,8 +222,8 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
     row_max_sigmoid_at_dim = sigmoid_gate[torch.arange(vocab_size), row_max_dim]  # raw最大值那个维度对应的sigmoid
     row_spike = row_max_raw - row_mean  # 尖刺度：最大值与均值之差
 
-    print(f"\n[10a. Top 20 tokens by row_max] (largest single-dim gate value)")
-    print(f"{'Token ID':>10} | {'Token':>20} | {'RowMax':>10} | {'Sig@Max':>10} | {'MaxDim':>6} | {'SigMax':>10} | {'RowMean':>10} | {'Spike':>10}")
+    print(f"\n[10a. 单维度门控值最大的 Top 20 token] (按行内最大值排序)")
+    print(f"{'Token ID':>10} | {'Token':>20} | {'行最大值':>10} | {'该维Sig':>10} | {'最大维':>6} | {'Sig最大':>10} | {'行均值':>10} | {'尖刺度':>10}")
     print("-" * 100)
     top_max = row_max_raw.topk(20)
     for idx, val in zip(top_max.indices, top_max.values):
@@ -234,8 +234,8 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
             ts = "<UNK>"
         print(f"{tid:>10} | {ts:>20} | {val.item():>10.6f} | {row_max_sigmoid_at_dim[tid].item():>10.6f} | {row_max_dim[tid].item():>6} | {row_sigmoid_max[tid].item():>10.6f} | {row_mean[tid].item():>10.6f} | {row_spike[tid].item():>10.6f}")
 
-    print(f"\n[10b. Top 20 tokens by spike] (row_max - row_mean, single-dim outlier)")
-    print(f"{'Token ID':>10} | {'Token':>20} | {'Spike':>10} | {'RowMax':>10} | {'Sig@Max':>10} | {'MaxDim':>6} | {'RowMean':>10} | {'Std':>10}")
+    print(f"\n[10b. 尖刺度最大的 Top 20 token] (行最大值 - 行均值，某维度远超其他维度)")
+    print(f"{'Token ID':>10} | {'Token':>20} | {'尖刺度':>10} | {'行最大值':>10} | {'该维Sig':>10} | {'最大维':>6} | {'行均值':>10} | {'标准差':>10}")
     print("-" * 100)
     top_spike = row_spike.topk(20)
     for idx, val in zip(top_spike.indices, top_spike.values):
@@ -268,7 +268,7 @@ def main():
     results = analyze_gate_matrix(gate_weight, tokenizer, init_value=INIT_VALUE)
     
     print(f"\n{'='*60}")
-    print("Analysis complete!")
+    print("分析完成！")
     print(f"{'='*60}")
 
 
