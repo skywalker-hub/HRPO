@@ -235,8 +235,8 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
         print(f"{tid:>10} | {ts:>20} | {val.item():>10.6f} | {row_max_sigmoid_at_dim[tid].item():>10.6f} | {row_max_dim[tid].item():>6} | {row_sigmoid_max[tid].item():>10.6f} | {row_mean[tid].item():>10.6f} | {row_spike[tid].item():>10.6f}")
 
     print(f"\n[10b. 尖刺度最大的 Top 20 token] (行最大值 - 行均值，某维度远超其他维度)")
-    print(f"{'Token ID':>10} | {'Token':>20} | {'尖刺度':>10} | {'行最大值':>10} | {'该维Sig':>10} | {'最大维':>6} | {'行均值':>10} | {'标准差':>10}")
-    print("-" * 100)
+    print(f"{'Token ID':>10} | {'Token':>20} | {'行最大值':>10} | {'该维Sig':>10} | {'最大维':>6} | {'行均值':>10} | {'标准差':>10}")
+    print("-" * 90)
     top_spike = row_spike.topk(20)
     for idx, val in zip(top_spike.indices, top_spike.values):
         tid = idx.item()
@@ -244,7 +244,7 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
             ts = tokenizer.decode([tid]).replace('\n', '\\n')
         except:
             ts = "<UNK>"
-        print(f"{tid:>10} | {ts:>20} | {val.item():>10.6f} | {row_max_raw[tid].item():>10.6f} | {row_max_sigmoid_at_dim[tid].item():>10.6f} | {row_max_dim[tid].item():>6} | {row_mean[tid].item():>10.6f} | {row_std[tid].item():>10.6f}")
+        print(f"{tid:>10} | {ts:>20} | {row_max_raw[tid].item():>10.6f} | {row_max_sigmoid_at_dim[tid].item():>10.6f} | {row_max_dim[tid].item():>6} | {row_mean[tid].item():>10.6f} | {row_std[tid].item():>10.6f}")
 
     return {
         'row_mean': row_mean,
