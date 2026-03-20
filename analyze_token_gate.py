@@ -114,7 +114,7 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
     
     # 5. 找出门控最开放的 token（sigmoid 最大）
     print(f"\n[3. 门控最开放的 Top 20 token] (Sigmoid均值最大)")
-    top_open = row_sigmoid_mean.topk(20)
+    top_open = row_sigmoid_mean.topk(30)
     print(f"{'Token ID':>10} | {'Token':>20} | {'Sigmoid均值':>12} | {'原始均值':>10}")
     print("-" * 60)
     for idx, val in zip(top_open.indices, top_open.values):
