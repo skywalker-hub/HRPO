@@ -18,12 +18,10 @@ os.environ["WANDB_PROJECT"] = "latent-reasoning"
 
 class GateCosineScheduleCallback(TrainerCallback):
     """
-    为 token_gate_matrix 提供独立的 warmup + 保持 + cosine 退火。
-    gate_warmup_ratio:  warmup 占总步数的比例
-    gate_decay_ratio:   cosine 衰减从总步数的多少比例处开始（之前保持峰值 lr）
+    为 token_gate_matrix 提供独立调度：从第一步起保持峰值 lr，
+    到 gate_decay_ratio 比例处才开始 cosine 衰减。
     """
-    def __init__(self, gate_warmup_ratio=0.1, gate_decay_ratio=0.5):
-        self.gate_warmup_ratio = gate_warmup_ratio
+    def __init__(self, gate_decay_ratio=0.5):
         self.gate_decay_ratio = gate_decay_ratio
         self.gate_base_lr = None
         self.gate_group_idx = None
@@ -47,13 +45,10 @@ class GateCosineScheduleCallback(TrainerCallback):
 
         step = state.global_step
         total = state.max_steps
-        warmup_end = int(total * self.gate_warmup_ratio)
         decay_start = int(total * self.gate_decay_ratio)
         group = optimizer.param_groups[idx]
 
-        if step < warmup_end:
-            group["lr"] = self.gate_base_lr * step / max(warmup_end, 1)
-        elif step < decay_start:
+        if step < decay_start:
             group["lr"] = self.gate_base_lr
         else:
             progress = (step - decay_start) / max(total - decay_start, 1)
@@ -204,10 +199,7 @@ def main(args):
         ],
         args = training_args,
         train_dataset = dataset,
-        callbacks=[GateCosineScheduleCallback(
-            gate_warmup_ratio=args.gate_warmup_ratio,
-            gate_decay_ratio=args.gate_decay_ratio,
-        )],
+        callbacks=[GateCosineScheduleCallback(gate_decay_ratio=args.gate_decay_ratio)],
     )
     patch_trainer_optimizer(
         trainer,
@@ -268,9 +260,8 @@ if __name__ == "__main__":
     parser.add_argument("--lr_residual_head", type=float, default=1e-4)  
     # 新增: Token 门控矩阵的学习率 (提高以克服bfloat16精度问题)
     parser.add_argument("--lr_token_gate_matrix", type=float, default=1e-2)
-    # gate 独立调度
-    parser.add_argument("--gate_warmup_ratio", type=float, default=0.1)
-    parser.add_argument("--gate_decay_ratio", type=float, default=0.7)
+    # gate 独立调度：cosine 衰减从总步数的多少比例处开始，之前保持峰值 lr
+    parser.add_argument("--gate_decay_ratio", type=float, default=0.5)
     
     parser.add_argument("--weight_decay", type=float, default=0.1)
     parser.add_argument("--warmup_ratio", type=float, default=0.1)
