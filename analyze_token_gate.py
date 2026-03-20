@@ -105,7 +105,7 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
     for idx, delta in zip(top_changed.indices, top_changed.values):
         token_id = idx.item()
         try:
-            token_str = tokenizer.decode([token_id]).replace('\n', '\\n')
+            token_str = repr(tokenizer.decode([token_id]))
         except:
             token_str = "<UNK>"
         mean_val = row_mean[token_id].item()
@@ -120,7 +120,7 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
     for idx, val in zip(top_open.indices, top_open.values):
         token_id = idx.item()
         try:
-            token_str = tokenizer.decode([token_id]).replace('\n', '\\n')
+            token_str = repr(tokenizer.decode([token_id]))
         except:
             token_str = "<UNK>"
         mean_val = row_mean[token_id].item()
@@ -134,7 +134,7 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
     for idx, val in zip(bottom_closed.indices, bottom_closed.values):
         token_id = idx.item()
         try:
-            token_str = tokenizer.decode([token_id]).replace('\n', '\\n')
+            token_str = repr(tokenizer.decode([token_id]))
         except:
             token_str = "<UNK>"
         mean_val = row_mean[token_id].item()
@@ -184,23 +184,23 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
     print(f"\n[6. 变化统计]")
     print(f"  偏离度 > {threshold} 的 token 数: {changed_count} / {vocab_size} ({100*changed_count/vocab_size:.2f}%)")
     
-    # 9. 输出变化最大的 token 的每个维度的数值和 sigmoid 值
-    most_changed_idx = delta_from_init.argmax().item()
-    try:
-        most_changed_token_str = tokenizer.decode([most_changed_idx]).replace('\n', '\\n')
-    except:
-        most_changed_token_str = "<UNK>"
-    most_changed_raw = gate_weight[most_changed_idx]
-    most_changed_sigmoid = torch.sigmoid(most_changed_raw)
-    print(f"\n[8. 变化最大的 token — 所有维度展开]")
-    print(f"  Token: '{most_changed_token_str}' (id={most_changed_idx}), 偏离度={delta_from_init[most_changed_idx].item():.6f}")
-    print(f"  总维度数: {hidden_size}")
-    print(f"  {'维度':>6} | {'原始值':>12} | {'Sigmoid':>12}")
-    print(f"  {'-'*36}")
-    for dim_idx in range(hidden_size):
-        raw_val = most_changed_raw[dim_idx].item()
-        sig_val = most_changed_sigmoid[dim_idx].item()
-        print(f"  {dim_idx:>6} | {raw_val:>12.6f} | {sig_val:>12.6f}")
+    # # 9. 输出变化最大的 token 的每个维度的数值和 sigmoid 值
+    # most_changed_idx = delta_from_init.argmax().item()
+    # try:
+    #     most_changed_token_str = tokenizer.decode([most_changed_idx]).replace('\n', '\\n')
+    # except:
+    #     most_changed_token_str = "<UNK>"
+    # most_changed_raw = gate_weight[most_changed_idx]
+    # most_changed_sigmoid = torch.sigmoid(most_changed_raw)
+    # print(f"\n[8. 变化最大的 token — 所有维度展开]")
+    # print(f"  Token: '{most_changed_token_str}' (id={most_changed_idx}), 偏离度={delta_from_init[most_changed_idx].item():.6f}")
+    # print(f"  总维度数: {hidden_size}")
+    # print(f"  {'维度':>6} | {'原始值':>12} | {'Sigmoid':>12}")
+    # print(f"  {'-'*36}")
+    # for dim_idx in range(hidden_size):
+    #     raw_val = most_changed_raw[dim_idx].item()
+    #     sig_val = most_changed_sigmoid[dim_idx].item()
+    #     print(f"  {dim_idx:>6} | {raw_val:>12.6f} | {sig_val:>12.6f}")
     
     # 10. 打印指定 token 的详细门控向量
     print(f"\n[9. 指定 token 的门控向量详情 (前 20 维)]")
@@ -229,7 +229,7 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
     for idx, val in zip(top_max.indices, top_max.values):
         tid = idx.item()
         try:
-            ts = tokenizer.decode([tid]).replace('\n', '\\n')
+            ts = repr(tokenizer.decode([tid]))
         except:
             ts = "<UNK>"
         print(f"{tid:>10} | {ts:>20} | {val.item():>10.6f} | {row_max_sigmoid_at_dim[tid].item():>10.6f} | {row_max_dim[tid].item():>6} | {row_sigmoid_max[tid].item():>10.6f} | {row_mean[tid].item():>10.6f} | {row_spike[tid].item():>10.6f}")
@@ -241,7 +241,7 @@ def analyze_gate_matrix(gate_weight, tokenizer, init_value=-3.0):
     for idx, val in zip(top_spike.indices, top_spike.values):
         tid = idx.item()
         try:
-            ts = tokenizer.decode([tid]).replace('\n', '\\n')
+            ts = repr(tokenizer.decode([tid]))
         except:
             ts = "<UNK>"
         print(f"{tid:>10} | {ts:>20} | {row_max_raw[tid].item():>10.6f} | {row_max_sigmoid_at_dim[tid].item():>10.6f} | {row_max_dim[tid].item():>6} | {row_mean[tid].item():>10.6f} | {row_sigmoid_mean[tid].item():>10.6f} | {row_std[tid].item():>10.6f}")
