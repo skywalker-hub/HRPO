@@ -193,7 +193,6 @@ def grpo_accumulated_loss(
     n_chunks = -1,
 ):
 
-    ####训练断点2：
     # All Unsloth Zoo code licensed under LGPLv3
     bsz, qlen = input_ids.shape
     # Find closest multiple
@@ -208,7 +207,7 @@ def grpo_accumulated_loss(
     lm_head = trainer.model.get_output_embeddings().weight
 
     ###############训练来过：
-    ###训练断点：重放
+    ###训练断点2：重放
     with torch.amp.autocast(device_type = "cuda", dtype = mixed_dtype):
         with torch.inference_mode(), trainer.accelerator.unwrap_model(trainer.model, keep_fp32_wrapper = False).disable_adapter():
             old_hidden_states = trainer.model(input_ids = input_ids, logits_to_keep = logits_to_keep + 1).logits
@@ -999,7 +998,8 @@ class _UnslothGRPOTrainer(Trainer):
             prompt_completion_ids = torch.cat([prompt_ids, completion_ids], dim=1)
         else:
             # Regular generation path
-            ####训练断点：已确认训练经过，生成第一次前向，此处开始多端口
+            ####训练断点1：rollout
+            # 已确认训练经过，生成第一次前向，此处开始多端口
             with unwrap_model_for_generation(self.model, self.accelerator) as unwrapped_model:
                 prompt_completion_ids, thinking_embeds, thinking_mask, embeds_ratio = unwrapped_model.generate(
                     prompt_ids, attention_mask=prompt_mask, 

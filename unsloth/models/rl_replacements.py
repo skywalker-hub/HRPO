@@ -400,6 +400,8 @@ def grpo_accumulated_loss(
     completion_input_ids = input_ids[:, -logits_to_keep:]
     lm_head = trainer.model.get_output_embeddings().weight
 
+
+    ####训练断点2:真实重放
     with torch.amp.autocast(device_type = "cuda", dtype = mixed_dtype):
         with torch.inference_mode(), trainer.accelerator.unwrap_model(trainer.model, keep_fp32_wrapper = False).disable_adapter():
             old_hidden_states = trainer.model(input_ids = input_ids, logits_to_keep = logits_to_keep + 1).logits

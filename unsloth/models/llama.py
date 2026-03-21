@@ -665,6 +665,8 @@ def LlamaModel_fast_forward(
         new_inputs_embeds = inputs_embeds.clone()
         # 传入 input_ids 用于查询 token 门控矩阵
         masked_input_ids = input_ids[thinking_mask] if input_ids is not None else None
+        
+        ####训练断点3: 混合替换 thinking_residual
         new_inputs_embeds[thinking_mask] = self.thinking_residual(
             inputs_embeds[thinking_mask], thinking_embeds[thinking_mask],
             input_ids=masked_input_ids,
