@@ -1,10 +1,21 @@
 """
-2025.4.1
-0
-4.53.3
-0.15.2
-__UNSLOTH_VERSIONING__
-此文件仅为示例文件，是运行中动态生成的。
+!!!! 请勿直接修改此文件 !!!!
+
+本文件并非项目的源文件，而是从运行时动态生成的结果中复制而来的示例，
+仅供阅读和调试参考。
+
+Unsloth 在运行时通过 inspect.getsource() 读取 trl/trainer/grpo_trainer.py 和
+unsloth/models/rl_replacements.py 的源码，经字符串替换与拼接后，
+由 exec/compile 动态编译生成此模块。
+
+如需修改训练逻辑，请编辑以下源文件：
+  - trl/trainer/grpo_trainer.py        (GRPOTrainer 原始实现)
+  - unsloth/models/rl_replacements.py  (Unsloth 注入的替换函数与优化逻辑)
+  - unsloth/models/rl.py               (动态生成流程入口)
+
+原始版本信息:
+  2025.4.1 / 4.53.3 / 0.15.2
+  __UNSLOTH_VERSIONING__
 """
 from torch import Tensor
 import torch
