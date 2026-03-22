@@ -35,7 +35,7 @@ def extract_boxed_answer(text: str) -> str | None:
     except IndexError:
         return None
 
-
+###核心奖励函数
 def get_reward_func(process_answer_func):
     def reward_func(completions, answer, **kwargs) -> list[float]:
         responses = [completion[0]["content"] for completion in completions]
@@ -264,7 +264,7 @@ def _strip_string(string):
     string = _fix_a_slash_b(string)
     return string
 
-
+### gsm8k answer 提取预测答案
 def process_gsm8k_answer(pred: str) -> str:
     pred = pred.strip("\n").rstrip(".").rstrip("/").strip(" ")
     pred = [delete_extra_zero(s.replace(",", "")) 
