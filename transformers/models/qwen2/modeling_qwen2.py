@@ -606,11 +606,19 @@ class Qwen2Model(Qwen2PreTrainedModel):
             with torch.no_grad():
                 discrete_norm = discrete_thinking.detach().norm(dim=-1).mean()
                 continuous_norm = continuous_thinking.detach().norm(dim=-1).mean()
-                # 比例: discrete / (discrete + continuous)，值域 [0, 1]
+                # 模值比例: continuous / (discrete + continuous)，值域 [0, 1]
                 total_norm = discrete_norm + continuous_norm + eps
                 self._discrete_norm = discrete_norm.item()
                 self._continuous_norm = continuous_norm.item()
                 self._thinking_norm_ratio = continuous_norm.item() / total_norm.item()
+
+                # 能量比例（平方和）：高维近似正交时 ||a||² + ||b||² ≈ ||a+b||²，分解更自洽
+                discrete_energy = discrete_thinking.detach().pow(2).sum(dim=-1).mean()
+                continuous_energy = continuous_thinking.detach().pow(2).sum(dim=-1).mean()
+                total_energy = discrete_energy + continuous_energy + eps
+                self._discrete_energy = discrete_energy.item()
+                self._continuous_energy = continuous_energy.item()
+                self._thinking_energy_ratio = continuous_energy.item() / total_energy.item()
 
         return discrete_thinking + continuous_thinking, a_t
 

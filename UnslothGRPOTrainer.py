@@ -1266,6 +1266,10 @@ class _UnslothGRPOTrainer(Trainer):
             discrete_norm = getattr(base_model, '_discrete_norm', 0.0)
             continuous_norm = getattr(base_model, '_continuous_norm', 0.0)
             thinking_norm_ratio = getattr(base_model, '_thinking_norm_ratio', 0.0)
+            # 读取能量比例
+            discrete_energy = getattr(base_model, '_discrete_energy', 0.0)
+            continuous_energy = getattr(base_model, '_continuous_energy', 0.0)
+            thinking_energy_ratio = getattr(base_model, '_thinking_energy_ratio', 0.0)
         except:
             pass
 
@@ -1290,6 +1294,10 @@ class _UnslothGRPOTrainer(Trainer):
             self._metrics[mode]["discrete_norm"].append(discrete_norm)
             self._metrics[mode]["continuous_norm"].append(continuous_norm)
             self._metrics[mode]["thinking_norm_ratio"].append(thinking_norm_ratio)
+            # discrete/continuous thinking 能量监控
+            self._metrics[mode]["discrete_energy"].append(discrete_energy)
+            self._metrics[mode]["continuous_energy"].append(continuous_energy)
+            self._metrics[mode]["thinking_energy_ratio"].append(thinking_energy_ratio)
         else:
             self._metrics["embeds_ratio"].append(mean_embeds_ratio.item())
             self._metrics["hidden_ratio"].append(mean_hidden_ratio.item())
@@ -1310,6 +1318,10 @@ class _UnslothGRPOTrainer(Trainer):
             self._metrics["discrete_norm"].append(discrete_norm)
             self._metrics["continuous_norm"].append(continuous_norm)
             self._metrics["thinking_norm_ratio"].append(thinking_norm_ratio)
+            # discrete/continuous thinking 能量监控
+            self._metrics["discrete_energy"].append(discrete_energy)
+            self._metrics["continuous_energy"].append(continuous_energy)
+            self._metrics["thinking_energy_ratio"].append(thinking_energy_ratio)
 
         ####训练断点：此处会失去调试追踪：
         return loss
