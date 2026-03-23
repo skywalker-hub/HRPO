@@ -697,7 +697,8 @@ class GRPOTrainer(Trainer):
                 reward_func_name = reward_func.__name__
             self._metrics[f"rewards/{reward_func_name}"].append(reward_per_func[i].item())
 
-        self._metrics["reward"].append(rewards.mean().item())
+        self._metrics["reward"].append(rewards_per_func.mean().item())
+        self._metrics["reward_total"].append(rewards.mean().item())
         self._metrics["reward_std"].append(std_grouped_rewards.mean().item())
 
         if (
