@@ -244,6 +244,17 @@ class GRPOConfig(TrainingArguments):
         },
     )
 
+    # Parameters that control relative length penalty for thinking tokens
+    relative_length_penalty: float = field(
+        default=0.0,
+        metadata={
+            "help": "Penalty coefficient for relative thinking length within a group. "
+            "When > 0, correct completions that use fewer thinking tokens get a bonus, "
+            "and those using more get a penalty. The reward is bounded to "
+            "[-0.5, +0.5] * penalty. Set to 0.0 to disable."
+        },
+    )
+
     # Parameters that control the logging
     log_completions: bool = field(
         default=False,
