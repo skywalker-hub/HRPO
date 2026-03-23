@@ -254,6 +254,14 @@ class GRPOConfig(TrainingArguments):
             "[-0.5, +0.5] * penalty. Set to 0.0 to disable."
         },
     )
+    relative_length_accuracy_requirement: Optional[float] = field(
+        default=1.0,
+        metadata={
+            "help": "Minimum correctness ratio in a group to trigger length penalty. "
+            "1.0 = all must be correct (safest). 0.5 = at least half correct. "
+            "None = no requirement (as long as >= 2 correct). "
+        },
+    )
 
     # Parameters that control the logging
     log_completions: bool = field(
