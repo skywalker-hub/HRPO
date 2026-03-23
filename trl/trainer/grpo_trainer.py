@@ -664,8 +664,13 @@ class GRPOTrainer(Trainer):
 
             rewards = rewards + rel_length_rewards.view(-1)
 
-            self._metrics["relative_length_reward"].append(rel_length_rewards.mean().item())
-            self._metrics["thinking_length"].append(thinking_lengths.mean().item())
+            active_mask = rel_length_rewards != 0
+            active_count = active_mask.sum().item()
+            self._metrics["rel_len/abs_mean"].append(
+                rel_length_rewards[active_mask].abs().mean().item() if active_count > 0 else 0.0
+            )
+            self._metrics["rel_len/active_ratio"].append(active_count / rel_length_rewards.numel())
+            self._metrics["rel_len/thinking_length"].append(thinking_lengths.mean().item())
 
         # Compute grouped-wise rewards
         mean_grouped_rewards = rewards.view(-1, self.num_generations).mean(dim=1)
