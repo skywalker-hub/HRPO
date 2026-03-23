@@ -262,6 +262,15 @@ class GRPOConfig(TrainingArguments):
             "None = no requirement (as long as >= 2 correct). "
         },
     )
+    relative_length_reward: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Behavior when accuracy requirement is NOT met. "
+            "None = skip (no length signal). "
+            "'same' = flip coefficient (reward longer thinking on hard problems). "
+            "A float string (e.g. '0.005') = use as custom coefficient."
+        },
+    )
 
     # Parameters that control the logging
     log_completions: bool = field(

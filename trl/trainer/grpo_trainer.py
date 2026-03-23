@@ -316,6 +316,7 @@ class GRPOTrainer(Trainer):
         self.beta = args.beta
         self.relative_length_penalty = args.relative_length_penalty
         self.relative_length_accuracy_requirement = args.relative_length_accuracy_requirement
+        self.relative_length_reward = args.relative_length_reward
 
         # The trainer estimates the number of FLOPs (floating-point operations) using the number of elements in the
         # input tensor associated with the key "input_ids". However, in GRPO, the sampled data does not include the
@@ -657,14 +658,26 @@ class GRPOTrainer(Trainer):
             rel_length_rewards = torch.zeros_like(grouped_rewards)
             for g_idx in range(grouped_rewards.size(0)):
                 valid = correct_mask[g_idx]
-                if valid.sum() < min_correct:
+                n_valid = valid.sum().item()
+                if n_valid < 2:
                     continue
+
+                if n_valid >= min_correct:
+                    coeff = -self.relative_length_penalty
+                else:
+                    if self.relative_length_reward is None:
+                        continue
+                    elif self.relative_length_reward == "same":
+                        coeff = self.relative_length_penalty
+                    else:
+                        coeff = float(self.relative_length_reward)
+
                 valid_lengths = grouped_lengths[g_idx][valid]
                 mean_len = valid_lengths.mean()
                 len_range = valid_lengths.max() - valid_lengths.min()
                 if len_range < 1e-6:
                     continue
-                rel_length_rewards[g_idx][valid] = -self.relative_length_penalty * (
+                rel_length_rewards[g_idx][valid] = coeff * (
                     grouped_lengths[g_idx][valid] - mean_len
                 ) / len_range
 
