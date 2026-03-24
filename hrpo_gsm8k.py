@@ -236,7 +236,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_prompt_length", type=int, default=1024)
     parser.add_argument("--max_completion_length", type=int, default=1024)
 
-    parser.add_argument("--relative_length_penalty", type=float, default=0.001)
+    parser.add_argument("--relative_length_penalty", type=float, default=1e-3)
     parser.add_argument("--relative_length_accuracy_requirement", type=float, default=1.0)
 
     parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-1.5B-Instruct")
