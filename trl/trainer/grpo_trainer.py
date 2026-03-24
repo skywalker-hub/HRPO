@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 import os
 import textwrap
 import warnings
@@ -315,7 +316,6 @@ class GRPOTrainer(Trainer):
 
         self.beta = args.beta
         self.relative_length_penalty = args.relative_length_penalty
-        self.relative_length_accuracy_requirement = args.relative_length_accuracy_requirement
 
         # The trainer estimates the number of FLOPs (floating-point operations) using the number of elements in the
         # input tensor associated with the key "input_ids". However, in GRPO, the sampled data does not include the
@@ -638,44 +638,37 @@ class GRPOTrainer(Trainer):
         # Apply weights to each reward function's output and sum
         rewards = (rewards_per_func * self.reward_weights.to(device).unsqueeze(0)).sum(dim=1)
 
-        # Relative thinking length penalty: among correct completions in each group,
-        # reward shorter thinking and penalize longer thinking.
+        # Cosine length scaling: correct+short → bonus, wrong+short → extra penalty.
+        # Uses group-relative max length so different difficulty levels are handled naturally.
         if self.relative_length_penalty > 0 and thinking_mask is not None:
             prompt_len = prompt_ids.size(1)
             thinking_lengths = (thinking_mask[:, prompt_len:] & completion_mask.bool()).sum(1).float()
 
             G = self.num_generations
-            grouped_rewards = rewards.view(-1, G)
             grouped_lengths = thinking_lengths.view(-1, G)
-            correct_mask = grouped_rewards > 0
+            grouped_rewards = rewards.view(-1, G)
 
-            if self.relative_length_accuracy_requirement is not None:
-                min_correct = max(2, int(self.relative_length_accuracy_requirement * G))
-            else:
-                min_correct = 2
+            # +1 for correct, -1 for wrong → flips cosine direction for wrong answers
+            correct_mask = (grouped_rewards > 0).float()
+            sign = 2.0 * correct_mask - 1.0
 
-            rel_length_rewards = torch.zeros_like(grouped_rewards)
-            for g_idx in range(grouped_rewards.size(0)):
-                valid = correct_mask[g_idx]
-                if valid.sum() < min_correct:
-                    continue
-                valid_lengths = grouped_lengths[g_idx][valid]
-                mean_len = valid_lengths.mean()
-                len_range = valid_lengths.max() - valid_lengths.min()
-                if len_range < 1e-6:
-                    continue
-                rel_length_rewards[g_idx][valid] = -self.relative_length_penalty * (
-                    grouped_lengths[g_idx][valid] - mean_len
-                ) / len_range
+            max_lens = grouped_lengths.max(dim=1, keepdim=True).values.clamp(min=1.0)
+            progress = grouped_lengths / max_lens
+            cosine = torch.cos(progress * math.pi)
 
-            rewards = rewards + rel_length_rewards.view(-1)
+            # Zero out groups where all lengths are identical (no signal)
+            len_range = grouped_lengths.max(dim=1, keepdim=True).values - grouped_lengths.min(dim=1, keepdim=True).values
+            active_groups = (len_range > 1e-6).float()
 
-            active_mask = rel_length_rewards != 0
+            length_rewards = sign * self.relative_length_penalty * cosine * active_groups
+            rewards = rewards + length_rewards.view(-1)
+
+            active_mask = length_rewards != 0
             active_count = active_mask.sum().item()
             self._metrics["rel_len/abs_mean"].append(
-                rel_length_rewards[active_mask].abs().mean().item() if active_count > 0 else 0.0
+                length_rewards[active_mask].abs().mean().item() if active_count > 0 else 0.0
             )
-            self._metrics["rel_len/active_ratio"].append(active_count / rel_length_rewards.numel())
+            self._metrics["rel_len/active_ratio"].append(active_count / length_rewards.numel())
             self._metrics["rel_len/thinking_length"].append(thinking_lengths.mean().item())
 
         # Compute grouped-wise rewards

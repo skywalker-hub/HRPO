@@ -244,22 +244,13 @@ class GRPOConfig(TrainingArguments):
         },
     )
 
-    # Parameters that control relative length penalty for thinking tokens
+    # Cosine length scaling for thinking tokens
     relative_length_penalty: float = field(
-        default=0.0,
+        default=0.1,
         metadata={
-            "help": "Penalty coefficient for relative thinking length within a group. "
-            "When > 0, correct completions that use fewer thinking tokens get a bonus, "
-            "and those using more get a penalty. The reward is bounded to "
-            "[-0.5, +0.5] * penalty. Set to 0.0 to disable."
-        },
-    )
-    relative_length_accuracy_requirement: Optional[float] = field(
-        default=1.0,
-        metadata={
-            "help": "Minimum correctness ratio in a group to trigger length penalty. "
-            "1.0 = all must be correct (safest). 0.5 = at least half correct. "
-            "None = no requirement (as long as >= 2 correct). "
+            "help": "Strength of cosine length scaling on rewards. "
+            "When > 0, correct+short completions get boosted, wrong+short get extra penalty. "
+            "Set to 0.0 to disable."
         },
     )
 
