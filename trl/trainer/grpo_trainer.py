@@ -640,27 +640,22 @@ class GRPOTrainer(Trainer):
         # Apply weights to each reward function's output and sum
         rewards = (rewards_per_func * self.reward_weights.to(device).unsqueeze(0)).sum(dim=1)
 
-        # Minimum thinking length gate: zero out rewards for completions that think too little
-        if self.min_thinking_length > 0 and thinking_mask is not None:
-            prompt_len = prompt_ids.size(1)
-            thinking_lens = (thinking_mask[:, prompt_len:] & completion_mask.bool()).sum(1)
-            too_short_mask = thinking_lens < self.min_thinking_length
-            num_zeroed = too_short_mask.sum().item()
-            rewards[too_short_mask] = 0.0
-            self._metrics["min_think/zeroed_ratio"].append(num_zeroed / len(rewards))
-            self._metrics["min_think/avg_thinking_len"].append(thinking_lens.float().mean().item())
-
         # Relative thinking length reward/penalty:
         #   - 全对时：惩罚过长（只罚不奖），鼓励精简思考
         #   - 未全对时：奖励更长思考（只奖不罚），对抗 advantage 的隐式短偏好
+        #   - thinking < min_thinking_length 的样本不参与长度奖惩（正确奖励不受影响）
         current_step = self.state.global_step if hasattr(self, 'state') else 0
         if self.relative_length_penalty > 0 and thinking_mask is not None and current_step >= self.length_penalty_delay_steps:
             prompt_len = prompt_ids.size(1)
             thinking_lengths = (thinking_mask[:, prompt_len:] & completion_mask.bool()).sum(1).float()
 
+            # min_thinking_length: 低于此长度的样本不参与长度奖惩
+            length_eligible = thinking_lengths >= self.min_thinking_length
+
             G = self.num_generations
             grouped_rewards = rewards.view(-1, G)
             grouped_lengths = thinking_lengths.view(-1, G)
+            grouped_eligible = length_eligible.view(-1, G)
             correct_mask = grouped_rewards > 0
 
             if self.relative_length_accuracy_requirement is not None:
@@ -670,16 +665,22 @@ class GRPOTrainer(Trainer):
 
             rel_length_rewards = torch.zeros_like(grouped_rewards)
             for g_idx in range(grouped_rewards.size(0)):
+                eligible = grouped_eligible[g_idx]
+                if eligible.sum() < 2:
+                    continue
+
                 n_correct = correct_mask[g_idx].sum().item()
-                all_lengths = grouped_lengths[g_idx]
-                mean_len = all_lengths.mean()
-                len_range = all_lengths.max() - all_lengths.min()
+                eligible_lengths = grouped_lengths[g_idx][eligible]
+                mean_len = eligible_lengths.mean()
+                len_range = eligible_lengths.max() - eligible_lengths.min()
                 if len_range < 1e-6:
                     continue
 
                 if n_correct >= min_correct:
                     # 全对：只惩罚过长的正确样本，不奖励短的
-                    valid = correct_mask[g_idx]
+                    valid = correct_mask[g_idx] & eligible
+                    if valid.sum() < 2:
+                        continue
                     valid_lengths = grouped_lengths[g_idx][valid]
                     valid_mean = valid_lengths.mean()
                     valid_range = valid_lengths.max() - valid_lengths.min()
@@ -690,11 +691,11 @@ class GRPOTrainer(Trainer):
                     ) / valid_range
                     rel_length_rewards[g_idx][valid] = raw.clamp(max=0.0)
                 else:
-                    # 未全对：对所有样本，奖励更长的思考（只奖不罚）
+                    # 未全对：对达标样本，奖励更长的思考（只奖不罚）
                     raw = self.relative_length_penalty * (
-                        all_lengths - mean_len
+                        grouped_lengths[g_idx][eligible] - mean_len
                     ) / len_range
-                    rel_length_rewards[g_idx] = raw.clamp(min=0.0)
+                    rel_length_rewards[g_idx][eligible] = raw.clamp(min=0.0)
 
             rewards = rewards + rel_length_rewards.view(-1)
 
@@ -705,6 +706,7 @@ class GRPOTrainer(Trainer):
             )
             self._metrics["rel_len/active_ratio"].append(active_count / rel_length_rewards.numel())
             self._metrics["rel_len/thinking_length"].append(thinking_lengths.mean().item())
+            self._metrics["min_think/eligible_ratio"].append(length_eligible.float().mean().item())
 
         # Compute grouped-wise rewards
         mean_grouped_rewards = rewards.view(-1, self.num_generations).mean(dim=1)
