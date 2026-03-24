@@ -262,6 +262,15 @@ class GRPOConfig(TrainingArguments):
             "None = no requirement (as long as >= 2 correct). "
         },
     )
+    length_penalty_cosine_warmup: bool = field(
+        default=True,
+        metadata={
+            "help": "If True, the relative_length_penalty ramps up from 0 to its target value "
+            "over the entire training using a cosine schedule: "
+            "penalty(t) = target * 0.5 * (1 - cos(pi * t / T)). "
+            "This avoids aggressive penalty in early training."
+        },
+    )
 
     # Parameters that control the logging
     log_completions: bool = field(

@@ -316,6 +316,7 @@ class GRPOTrainer(Trainer):
         self.beta = args.beta
         self.relative_length_penalty = args.relative_length_penalty
         self.relative_length_accuracy_requirement = args.relative_length_accuracy_requirement
+        self.length_penalty_cosine_warmup = args.length_penalty_cosine_warmup
 
         # The trainer estimates the number of FLOPs (floating-point operations) using the number of elements in the
         # input tensor associated with the key "input_ids". However, in GRPO, the sampled data does not include the
@@ -641,6 +642,15 @@ class GRPOTrainer(Trainer):
         # Relative thinking length penalty: among correct completions in each group,
         # reward shorter thinking and penalize longer thinking.
         if self.relative_length_penalty > 0 and thinking_mask is not None:
+            # 计算当前生效的惩罚系数（余弦爬升 or 固定值）
+            if self.length_penalty_cosine_warmup and hasattr(self, 'state') and self.state.max_steps > 0:
+                import math
+                progress = self.state.global_step / self.state.max_steps
+                cosine_scale = 0.5 * (1 - math.cos(math.pi * progress))
+                effective_penalty = self.relative_length_penalty * cosine_scale
+            else:
+                effective_penalty = self.relative_length_penalty
+
             prompt_len = prompt_ids.size(1)
             thinking_lengths = (thinking_mask[:, prompt_len:] & completion_mask.bool()).sum(1).float()
 
@@ -664,7 +674,7 @@ class GRPOTrainer(Trainer):
                 len_range = valid_lengths.max() - valid_lengths.min()
                 if len_range < 1e-6:
                     continue
-                rel_length_rewards[g_idx][valid] = -self.relative_length_penalty * (
+                rel_length_rewards[g_idx][valid] = -effective_penalty * (
                     grouped_lengths[g_idx][valid] - mean_len
                 ) / len_range
 
@@ -677,6 +687,7 @@ class GRPOTrainer(Trainer):
             )
             self._metrics["rel_len/active_ratio"].append(active_count / rel_length_rewards.numel())
             self._metrics["rel_len/thinking_length"].append(thinking_lengths.mean().item())
+            self._metrics["rel_len/effective_penalty"].append(effective_penalty)
 
         # Compute grouped-wise rewards
         mean_grouped_rewards = rewards.view(-1, self.num_generations).mean(dim=1)
