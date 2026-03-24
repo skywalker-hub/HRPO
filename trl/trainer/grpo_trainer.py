@@ -317,6 +317,7 @@ class GRPOTrainer(Trainer):
         self.relative_length_penalty = args.relative_length_penalty
         self.relative_length_accuracy_requirement = args.relative_length_accuracy_requirement
         self.length_penalty_cosine_warmup = args.length_penalty_cosine_warmup
+        self.length_penalty_delay_steps = args.length_penalty_delay_steps
 
         # The trainer estimates the number of FLOPs (floating-point operations) using the number of elements in the
         # input tensor associated with the key "input_ids". However, in GRPO, the sampled data does not include the
@@ -642,10 +643,15 @@ class GRPOTrainer(Trainer):
         # Relative thinking length penalty: among correct completions in each group,
         # reward shorter thinking and penalize longer thinking.
         if self.relative_length_penalty > 0 and thinking_mask is not None:
-            # 计算当前生效的惩罚系数（余弦爬升 or 固定值）
-            if self.length_penalty_cosine_warmup and hasattr(self, 'state') and self.state.max_steps > 0:
+            # 计算当前生效的惩罚系数：delay 步内为 0，之后余弦爬升（或固定值）
+            current_step = self.state.global_step if hasattr(self, 'state') else 0
+            if current_step < self.length_penalty_delay_steps:
+                effective_penalty = 0.0
+            elif self.length_penalty_cosine_warmup and hasattr(self, 'state') and self.state.max_steps > 0:
                 import math
-                progress = self.state.global_step / self.state.max_steps
+                remaining_steps = self.state.max_steps - self.length_penalty_delay_steps
+                elapsed_since_delay = current_step - self.length_penalty_delay_steps
+                progress = elapsed_since_delay / max(remaining_steps, 1)
                 cosine_scale = 0.5 * (1 - math.cos(math.pi * progress))
                 effective_penalty = self.relative_length_penalty * cosine_scale
             else:

@@ -266,9 +266,17 @@ class GRPOConfig(TrainingArguments):
         default=True,
         metadata={
             "help": "If True, the relative_length_penalty ramps up from 0 to its target value "
-            "over the entire training using a cosine schedule: "
-            "penalty(t) = target * 0.5 * (1 - cos(pi * t / T)). "
+            "using a cosine schedule after delay steps: "
+            "penalty(t) = target * 0.5 * (1 - cos(pi * (t - delay) / (T - delay))). "
             "This avoids aggressive penalty in early training."
+        },
+    )
+    length_penalty_delay_steps: int = field(
+        default=400,
+        metadata={
+            "help": "Number of steps to delay before the length penalty starts. "
+            "During these steps the effective penalty is 0. "
+            "After this, if cosine_warmup is enabled, the penalty ramps up via cosine schedule."
         },
     )
 
