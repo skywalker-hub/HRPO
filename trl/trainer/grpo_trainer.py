@@ -640,9 +640,9 @@ class GRPOTrainer(Trainer):
         # Apply weights to each reward function's output and sum
         rewards = (rewards_per_func * self.reward_weights.to(device).unsqueeze(0)).sum(dim=1)
 
-        # Relative thinking length reward/penalty:
+        # Relative thinking length penalty:
         #   - 全对时：惩罚过长（只罚不奖），鼓励精简思考
-        #   - 未全对时：奖励更长思考（只奖不罚），对抗 advantage 的隐式短偏好
+        #   - 未全对时：惩罚过短（只罚不奖），防止思考坍缩
         #   - thinking < min_thinking_length 的样本不参与长度奖惩（正确奖励不受影响）
         current_step = self.state.global_step if hasattr(self, 'state') else 0
         if self.relative_length_penalty > 0 and thinking_mask is not None and current_step >= self.length_penalty_delay_steps:
@@ -691,11 +691,14 @@ class GRPOTrainer(Trainer):
                     ) / valid_range
                     rel_length_rewards[g_idx][valid] = raw.clamp(max=0.0)
                 else:
-                    # 未全对：对达标样本，奖励更长的思考（只奖不罚）
-                    raw = self.relative_length_penalty * (
-                        grouped_lengths[g_idx][eligible] - mean_len
+                    # 未全对：只对答对且达标的样本，惩罚过短的思考（只罚不奖）
+                    valid = correct_mask[g_idx] & eligible
+                    if valid.sum() < 1:
+                        continue
+                    raw = -self.relative_length_penalty * (
+                        mean_len - grouped_lengths[g_idx][valid]
                     ) / len_range
-                    rel_length_rewards[g_idx][eligible] = raw.clamp(min=0.0)
+                    rel_length_rewards[g_idx][valid] = raw.clamp(max=0.0)
 
             rewards = rewards + rel_length_rewards.view(-1)
 
