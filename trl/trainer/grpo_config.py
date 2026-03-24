@@ -262,6 +262,13 @@ class GRPOConfig(TrainingArguments):
             "None = no requirement (as long as >= 2 correct). "
         },
     )
+    length_penalty_delay_steps: int = field(
+        default=100,
+        metadata={
+            "help": "Number of steps before the length reward/penalty logic activates. "
+            "During these steps the model learns format without length interference."
+        },
+    )
     min_thinking_length: int = field(
         default=0,
         metadata={

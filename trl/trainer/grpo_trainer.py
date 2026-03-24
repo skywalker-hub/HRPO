@@ -317,6 +317,7 @@ class GRPOTrainer(Trainer):
         self.relative_length_penalty = args.relative_length_penalty
         self.relative_length_accuracy_requirement = args.relative_length_accuracy_requirement
         self.min_thinking_length = args.min_thinking_length
+        self.length_penalty_delay_steps = args.length_penalty_delay_steps
 
         # The trainer estimates the number of FLOPs (floating-point operations) using the number of elements in the
         # input tensor associated with the key "input_ids". However, in GRPO, the sampled data does not include the
@@ -652,7 +653,8 @@ class GRPOTrainer(Trainer):
         # Relative thinking length reward/penalty:
         #   - 全对时：惩罚过长（只罚不奖），鼓励精简思考
         #   - 未全对时：奖励更长思考（只奖不罚），对抗 advantage 的隐式短偏好
-        if self.relative_length_penalty > 0 and thinking_mask is not None:
+        current_step = self.state.global_step if hasattr(self, 'state') else 0
+        if self.relative_length_penalty > 0 and thinking_mask is not None and current_step >= self.length_penalty_delay_steps:
             prompt_len = prompt_ids.size(1)
             thinking_lengths = (thinking_mask[:, prompt_len:] & completion_mask.bool()).sum(1).float()
 
