@@ -238,7 +238,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_prompt_length", type=int, default=1024)
     parser.add_argument("--max_completion_length", type=int, default=1024)
 
-    parser.add_argument("--relative_length_penalty", type=float, default=1e-3)
+    parser.add_argument("--relative_length_penalty", type=float, default=1e-4)
     parser.add_argument("--relative_length_accuracy_requirement", type=float, default=1.0)
     parser.add_argument("--min_thinking_length", type=int, default=128)
     parser.add_argument("--length_penalty_delay_steps", type=int, default=0)
