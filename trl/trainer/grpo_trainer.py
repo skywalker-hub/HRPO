@@ -316,6 +316,7 @@ class GRPOTrainer(Trainer):
         self.beta = args.beta
         self.relative_length_penalty = args.relative_length_penalty
         self.relative_length_accuracy_requirement = args.relative_length_accuracy_requirement
+        self.min_thinking_length = args.min_thinking_length
 
         # The trainer estimates the number of FLOPs (floating-point operations) using the number of elements in the
         # input tensor associated with the key "input_ids". However, in GRPO, the sampled data does not include the
@@ -638,8 +639,19 @@ class GRPOTrainer(Trainer):
         # Apply weights to each reward function's output and sum
         rewards = (rewards_per_func * self.reward_weights.to(device).unsqueeze(0)).sum(dim=1)
 
-        # Relative thinking length penalty: among correct completions in each group,
-        # reward shorter thinking and penalize longer thinking.
+        # Minimum thinking length gate: zero out rewards for completions that think too little
+        if self.min_thinking_length > 0 and thinking_mask is not None:
+            prompt_len = prompt_ids.size(1)
+            thinking_lens = (thinking_mask[:, prompt_len:] & completion_mask.bool()).sum(1)
+            too_short_mask = thinking_lens < self.min_thinking_length
+            num_zeroed = too_short_mask.sum().item()
+            rewards[too_short_mask] = 0.0
+            self._metrics["min_think/zeroed_ratio"].append(num_zeroed / len(rewards))
+            self._metrics["min_think/avg_thinking_len"].append(thinking_lens.float().mean().item())
+
+        # Relative thinking length reward/penalty:
+        #   - 全对时：惩罚过长（只罚不奖），鼓励精简思考
+        #   - 未全对时：奖励更长思考（只奖不罚），对抗 advantage 的隐式短偏好
         if self.relative_length_penalty > 0 and thinking_mask is not None:
             prompt_len = prompt_ids.size(1)
             thinking_lengths = (thinking_mask[:, prompt_len:] & completion_mask.bool()).sum(1).float()
@@ -656,17 +668,31 @@ class GRPOTrainer(Trainer):
 
             rel_length_rewards = torch.zeros_like(grouped_rewards)
             for g_idx in range(grouped_rewards.size(0)):
-                valid = correct_mask[g_idx]
-                if valid.sum() < min_correct:
-                    continue
-                valid_lengths = grouped_lengths[g_idx][valid]
-                mean_len = valid_lengths.mean()
-                len_range = valid_lengths.max() - valid_lengths.min()
+                n_correct = correct_mask[g_idx].sum().item()
+                all_lengths = grouped_lengths[g_idx]
+                mean_len = all_lengths.mean()
+                len_range = all_lengths.max() - all_lengths.min()
                 if len_range < 1e-6:
                     continue
-                rel_length_rewards[g_idx][valid] = -self.relative_length_penalty * (
-                    grouped_lengths[g_idx][valid] - mean_len
-                ) / len_range
+
+                if n_correct >= min_correct:
+                    # 全对：只惩罚过长的正确样本，不奖励短的
+                    valid = correct_mask[g_idx]
+                    valid_lengths = grouped_lengths[g_idx][valid]
+                    valid_mean = valid_lengths.mean()
+                    valid_range = valid_lengths.max() - valid_lengths.min()
+                    if valid_range < 1e-6:
+                        continue
+                    raw = -self.relative_length_penalty * (
+                        grouped_lengths[g_idx][valid] - valid_mean
+                    ) / valid_range
+                    rel_length_rewards[g_idx][valid] = raw.clamp(max=0.0)
+                else:
+                    # 未全对：对所有样本，奖励更长的思考（只奖不罚）
+                    raw = self.relative_length_penalty * (
+                        all_lengths - mean_len
+                    ) / len_range
+                    rel_length_rewards[g_idx] = raw.clamp(min=0.0)
 
             rewards = rewards + rel_length_rewards.view(-1)
 

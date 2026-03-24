@@ -144,6 +144,7 @@ def main(args):
         max_completion_length = args.max_completion_length,
         relative_length_penalty = args.relative_length_penalty,
         relative_length_accuracy_requirement = args.relative_length_accuracy_requirement,
+        min_thinking_length = args.min_thinking_length,
         num_train_epochs = 1,
         save_steps = 250,
         save_total_limit = 3,
@@ -238,6 +239,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--relative_length_penalty", type=float, default=1e-3)
     parser.add_argument("--relative_length_accuracy_requirement", type=float, default=1.0)
+    parser.add_argument("--min_thinking_length", type=int, default=128)
 
     parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-1.5B-Instruct")
     parser.add_argument("--seed", type=int, default=42)

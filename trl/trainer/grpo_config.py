@@ -262,6 +262,15 @@ class GRPOConfig(TrainingArguments):
             "None = no requirement (as long as >= 2 correct). "
         },
     )
+    min_thinking_length: int = field(
+        default=0,
+        metadata={
+            "help": "Minimum number of thinking tokens required. "
+            "If a completion's thinking length is below this threshold, "
+            "its reward is zeroed out regardless of correctness. "
+            "Set to 0 to disable."
+        },
+    )
 
     # Parameters that control the logging
     log_completions: bool = field(
