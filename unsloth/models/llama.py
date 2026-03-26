@@ -667,6 +667,7 @@ def LlamaModel_fast_forward(
         masked_input_ids = input_ids[thinking_mask] if input_ids is not None else None
         
         ####训练断点3: 混合替换 thinking_residual
+        #####一次准备好所有位置的实际输入，这是为什么无法bptt的原因
         new_inputs_embeds[thinking_mask] = self.thinking_residual(
             inputs_embeds[thinking_mask], thinking_embeds[thinking_mask],
             input_ids=masked_input_ids,

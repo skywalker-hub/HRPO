@@ -1,0 +1,230 @@
+\chapter{基于强化学习的隐状态融合推理训练算法}
+
+\section{引言}
+
+
+\section{问题与符号定义}
+
+
+\section{方法介绍}
+
+上一节介绍了隐式推理表征的构造方法，本节将阐述如何在强化学习范式下训练模型学会有效利用连续隐状态进行推理。本文提出的训练框架采用两阶段交替执行的结构：第一阶段为策略采样，模型以自回归方式生成推理序列，并在思考阶段将上一步的隐藏状态与当前词嵌入进行融合；第二阶段为策略优化，利用生成结果和奖励信号通过策略梯度方法更新模型参数。整体框架如图 3-X 所示。
+
+与传统的思维链微调方法不同，本框架无需预先标注的推理轨迹数据集，而是依靠当前策略模型自身的探索能力进行在线采样，并通过任务奖励信号引导模型自主学习何时以及如何融合连续信息。此外，框架在训练过程中始终保留离散 Token 的随机采样机制，通过温度参数控制探索程度，使得连续思维的引入不会导致生成多样性的塌缩。
+
+\subsection{基于模型隐状态的融合推理算法}
+
+本小节详细介绍前向推理过程中离散思维与连续思维的融合机制。在标准的自回归语言模型中，第 $t$ 步的生成过程仅依赖当前输入 Token 的词嵌入向量 $\mathbf{e}_t$，经过 Transformer 解码器后产生下一个 Token 的概率分布。而本文的核心改进在于：在词嵌入层引入一个融合推理残差模块，将 $\mathbf{e}_t$ 与上一步 Transformer 输出的隐藏状态 $\mathbf{h}_{t-1}$ 进行参数化融合，构造出包含连续推理信息的混合嵌入 $\tilde{\mathbf{e}}_t$，再将其送入后续的 Transformer 层进行计算。
+
+首先给出基本符号定义。对于输入提示序列 $X = \{x_1, x_2, \ldots, x_n\}$，模型首先将其转换为词嵌入序列 $E = \{\mathbf{e}_1, \mathbf{e}_2, \ldots, \mathbf{e}_n\}$，其中 $\mathbf{e}_i \in \mathbb{R}^d$，$d$ 为模型隐藏层维度。Transformer 解码器对嵌入序列进行逐层处理，第 $t$ 步输出的最终隐藏状态记为 $\mathbf{h}_t$，如式(\ref{eq:hidden-state-transformer})所示：
+\begin{equation}\label{eq:hidden-state-transformer}
+  \mathbf{h}_t = \text{Transformer}(\tilde{\mathbf{e}}_t, \text{KVcache}_{<t})
+\end{equation}
+其中 $\text{KVcache}_{<t}$ 表示前 $t-1$ 步缓存的键值对。随后通过语言模型头（LM Head）将隐藏状态映射到词表空间，采样下一个 Token $\hat{x}_{t+1}$，如式(\ref{eq:next-token-sampling})所示：
+\begin{equation}\label{eq:next-token-sampling}
+  \hat{x}_{t+1} \sim \text{softmax}(\text{Head}(\mathbf{h}_t) / \tau)
+\end{equation}
+其中 $\tau$ 为温度参数，$\text{Head}(\cdot)$ 为线性投影层。在标准自回归生成中，下一步的输入即为 $\hat{x}_{t+1}$ 的词嵌入 $\hat{\mathbf{e}}_{t+1} = \text{Embed}(\hat{x}_{t+1})$。而在本文的框架中，$\hat{\mathbf{e}}_{t+1}$ 在送入 Transformer 之前，将与隐藏状态 $\mathbf{h}_t$ 通过融合推理残差模块进行混合。
+
+\subsubsection{融合推理残差}
+
+融合推理残差模块的核心目标是将上一步隐藏状态 $\mathbf{h}_t$ 中蕴含的推理信息注入到当前词嵌入中。然而，Transformer 各层输出的隐藏状态位于模型内部的表示空间，其分布特性与词嵌入空间存在显著差异，直接作为输入会降低生成质量。因此，需要先对隐藏状态进行空间投影和归一化处理。
+
+具体而言，由于隐藏状态的向量模长通常远大于词嵌入（可达数百至数千量级），若直接将其作为线性层的输入，则参数梯度的尺度将被输入模长主导，导致训练不稳定。为此，本文先对 $\mathbf{h}_t$ 施加均方根归一化（RMSNorm），使其模长归一化到稳定范围，再通过可学习的线性投影矩阵 $\mathbf{W}_{\text{proj}} \in \mathbb{R}^{d \times d}$ 将其映射到融合空间，得到连续信息向量 $\hat{\mathbf{h}}_t$，如式(\ref{eq:hidden-state-rmsnorm})和式(\ref{eq:hidden-state-projection})所示：
+\begin{equation}\label{eq:hidden-state-rmsnorm}
+  \bar{\mathbf{h}}_t = \frac{\mathbf{h}_t}{\sqrt{\frac{1}{d}\sum_{i=1}^{d} h_{t,i}^2 + \epsilon}}
+\end{equation}
+\begin{equation}\label{eq:hidden-state-projection}
+  \hat{\mathbf{h}}_t = \mathbf{W}_{\text{proj}} \bar{\mathbf{h}}_t
+\end{equation}
+其中 $\epsilon$ 为数值稳定性常数。通过上述处理，连续信息向量 $\hat{\mathbf{h}}_t$ 的数值范围与词嵌入相匹配，有利于后续融合计算的数值稳定性。
+
+在此基础上，本文借鉴门控循环网络的设计思想，构造了一种带有指数衰减门控的融合机制。首先，通过可学习的重置门计算门控信号 $\mathbf{r}_t$，用于调节隐藏状态对融合过程的影响强度，如式(\ref{eq:reset-gate})所示：
+\begin{equation}\label{eq:reset-gate}
+  \mathbf{r}_t = \sigma(\mathbf{W}_r \hat{\mathbf{h}}_t + \mathbf{b}_r)
+\end{equation}
+其中 $\mathbf{W}_r \in \mathbb{R}^{d \times d}$ 和 $\mathbf{b}_r \in \mathbb{R}^d$ 为可学习参数，$\sigma(\cdot)$ 为 Sigmoid 激活函数，使 $\mathbf{r}_t \in (0, 1)^d$。
+
+随后，由门控信号 $\mathbf{r}_t$ 与可学习的衰减速率参数 $\boldsymbol{\Lambda} \in \mathbb{R}^d$ 共同决定衰减系数 $\boldsymbol{\alpha}_t$，如式(\ref{eq:decay-factor})所示：
+\begin{equation}\label{eq:decay-factor}
+  \boldsymbol{\alpha}_t = \exp\left(-c \cdot \text{softplus}(-\boldsymbol{\Lambda}) \odot \mathbf{r}_t\right)
+\end{equation}
+其中 $c$ 为固定的缩放常数，$\text{softplus}(x) = \log(1 + e^x)$ 为平滑的非负激活函数，$\odot$ 表示逐元素乘法。由于 $\text{softplus}(-\boldsymbol{\Lambda}) > 0$ 且 $\mathbf{r}_t \in (0, 1)$，指数函数的自变量始终为非正数，因此 $\boldsymbol{\alpha}_t \in (0, 1]^d$。衰减系数 $\boldsymbol{\alpha}_t$ 的物理意义是：其值越接近 1，则当前步越依赖离散词嵌入；其值越接近 0，则连续信息的注入比例越大。
+
+\subsubsection{基于 Token 的离散门控}
+
+HRPO 原始公式中使用输入门 $\mathbf{i}_t$ 对连续信息向量进行逐维度调制。本文在此基础上提出了一种改进的门控策略：使用基于离散 Token ID 的可学习门控矩阵替代原始的输入门。其动机在于，不同 Token 对连续信息的需求程度应有所不同——例如数学运算符或关键数字可能更需要连续推理信息的辅助，而普通连接词则不然。通过将门控信号与 Token 身份直接关联，模型可以学习到细粒度的、与词汇语义相关的融合策略。
+
+具体地，定义一个可学习的门控嵌入矩阵 $\mathbf{G} \in \mathbb{R}^{|\mathcal{V}| \times d}$，其中 $|\mathcal{V}|$ 为词表大小。对于当前采样得到的 Token $\hat{x}_{t+1}$，其对应的门控向量如式(\ref{eq:token-gate})所示：
+\begin{equation}\label{eq:token-gate}
+  \mathbf{g}_t = \sigma(\mathbf{G}[\hat{x}_{t+1}])
+\end{equation}
+其中 $\mathbf{G}[\hat{x}_{t+1}]$ 表示从矩阵 $\mathbf{G}$ 中按 Token ID 查表得到的 $d$ 维向量，经 Sigmoid 函数映射到 $(0, 1)^d$。该门控向量与连续信息向量逐元素相乘，得到经过离散门控调制的连续偏置 $\mathbf{b}_t$，如式(\ref{eq:continuous-bias})所示：
+\begin{equation}\label{eq:continuous-bias}
+  \mathbf{b}_t = \hat{\mathbf{h}}_t \odot \mathbf{g}_t
+\end{equation}
+通过这种设计，连续信息的注入不仅受到全局衰减系数 $\boldsymbol{\alpha}_t$ 的控制，还受到与具体词汇绑定的局部门控信号 $\mathbf{g}_t$ 的调制，从而实现更精细的信息融合控制。
+
+\subsubsection{混合嵌入的最终计算}
+
+综合上述各组件，混合嵌入 $\tilde{\mathbf{e}}_{t+1}$ 由离散词嵌入和连续偏置通过衰减系数进行加权混合，如式(\ref{eq:hybrid-embedding})所示：
+\begin{equation}\label{eq:hybrid-embedding}
+  \tilde{\mathbf{e}}_{t+1} =
+  \begin{cases}
+    \boldsymbol{\alpha}_t \odot \hat{\mathbf{e}}_{t+1} + \sqrt{1 - \boldsymbol{\alpha}_t^2 + \epsilon} \odot \mathbf{b}_t, & t \in \mathcal{T}_{\text{think}} \\
+    \hat{\mathbf{e}}_{t+1}, & t \notin \mathcal{T}_{\text{think}}
+  \end{cases}
+\end{equation}
+其中 $\mathcal{T}_{\text{think}}$ 表示思考阶段的时间步集合，即模型尚未生成回答标记的阶段。当生成过程进入回答阶段后，融合机制关闭，模型恢复标准自回归生成，以保证最终输出的离散文本质量不受连续信息干扰。
+
+式(\ref{eq:hybrid-embedding})中的系数结构 $(\boldsymbol{\alpha}_t, \sqrt{1-\boldsymbol{\alpha}_t^2})$ 构成了一种能量守恒式的混合方式。从几何角度看，当词嵌入 $\hat{\mathbf{e}}_{t+1}$ 与连续偏置 $\mathbf{b}_t$ 在高维空间中近似正交时（这在高维随机向量间普遍成立），混合后的向量满足 $\|\tilde{\mathbf{e}}_{t+1}\|^2 \approx \|\boldsymbol{\alpha}_t \odot \hat{\mathbf{e}}_{t+1}\|^2 + \|(1-\boldsymbol{\alpha}_t^2)^{1/2} \odot \mathbf{b}_t\|^2$，即离散分量与连续分量的能量之和近似守恒。相比简单的线性插值 $\alpha \cdot \mathbf{e} + (1-\alpha) \cdot \mathbf{b}$，这种设计避免了混合后向量模长随 $\alpha$ 变化而产生的剧烈波动，保证融合后的嵌入向量与原始词嵌入处于相似的数值范围，有利于后续 Transformer 层的稳定计算。
+
+此外，$\boldsymbol{\Lambda}$ 的初始化对训练稳定性至关重要。为使训练初期的衰减系数 $\boldsymbol{\alpha}_t$ 接近 1，本文将 $\boldsymbol{\Lambda}$ 的初值设定为使 $\boldsymbol{\alpha}_0 \in [r_{\min}, r_{\max}]$ 的反解值。通过将 $r_{\min}$ 和 $r_{\max}$ 设定在接近 1 的范围，可以保证训练起始时模型输入以离散词嵌入为主导，避免随机初始化的连续信息破坏模型原有的生成能力。随着训练推进，$\boldsymbol{\alpha}_t$ 的值域将收敛到最优范围，从而逐步融入来自隐藏表示和采样 Token 的双重特征。
+
+\subsubsection{自回归生成中的隐状态传递}
+
+在自回归生成阶段，上述融合推理过程以时序链式的方式在每步解码中执行。生成过程可分为两个阶段：预填充（Prefill）阶段和逐步生成阶段。
+
+在预填充阶段，完整的提示序列一次性送入模型，构建各层注意力机制所需的键值缓存（KV cache），并获取提示末尾位置的隐藏状态作为后续隐状态传递链的起始点。此阶段不涉及融合推理操作，模型按照标准流程处理输入。
+
+在逐步生成阶段，每一步的计算流程如下：首先，获取上一步输出的隐藏状态 $\mathbf{h}_t$ 作为连续信息来源；其次，对当前采样得到的 Token 执行式(\ref{eq:hidden-state-rmsnorm})至式(\ref{eq:hybrid-embedding})的融合计算；再次，将融合后的嵌入送入 Transformer，获得本步的隐藏状态和 logits；最后，从 logits 中采样下一个 Token，并判断是否仍处于思考阶段。该过程持续至生成结束标记或达到最大长度。
+
+判断思考阶段与回答阶段的方法为：在每步生成后，对已生成的序列进行解码，检测是否出现预定义的回答标记。出现之前的所有步骤属于思考阶段，执行融合推理；出现之后的步骤属于回答阶段，关闭融合机制。这一设计保证了模型在探索推理路径时能够充分利用连续隐空间的信息，而在产出最终答案时恢复精确的离散生成能力。
+
+在生成过程中，每个位置还同步记录三项信息用于后续训练阶段，分别为融合后的实际嵌入向量 $\tilde{\mathbf{e}}_t$、该位置是否处于思考阶段的布尔掩码 $m_t$ 以及衰减系数的均值 $\bar{\alpha}_t$。这些信息将在训练阶段的混合重放机制中被使用。
+
+整体而言，本文的融合推理方法通过投影和归一化将隐藏状态映射到嵌入空间，同时保留离散 Token 采样步骤以维持强化学习所需的随机探索性。所设计的即插即用门控机制在初始阶段以离散词嵌入为主导，随训练进展逐步融入连续隐状态信号，为后续推理步骤提供更丰富的输入表示。具体的算法流程如算法 X 所示。
+
+\subsection{基于难度感知奖励的强化学习训练算法}
+
+在第 3.3.1 节完成混合输入的前向推理架构设计后，本节将介绍如何利用强化学习对上述架构进行端到端的策略优化。与传统的监督微调不同，基于强化学习的语言模型训练方法无需步骤级的标注数据，而可以仅通过最终结果获取奖励信号以引导模型自主探索更优的推理策略。本小节首先阐述奖励函数的设计，随后详细介绍基于群组相对策略优化（GRPO）算法的完整训练流程。
+
+\subsubsection{奖励函数设计}
+
+奖励函数的设计直接决定了强化学习的优化方向，是训练算法的核心组成部分。本文设计了一种两层结构的奖励函数：底层为基础正确性奖励，上层为基于难度感知的相对思考长度惩罚。两层奖励通过加法组合，共同构成策略优化的完整信号。
+
+\paragraph{基础正确性奖励}
+
+给定问题 $x$，其标准答案标签为 $y$，模型的第 $i$ 个采样输出为 $\hat{y}_i$。定义答案提取函数 $\text{extract}(\cdot)$ 为从模型输出中定位答案标记并提取其后的文本内容，经过数值标准化处理后与标准答案进行比对。同时定义格式验证函数 $\text{format}(\cdot)$，要求输出中答案标记恰好出现一次，以避免模型产生多个答案标记导致的提取歧义。
+
+基础正确性奖励将答案正确性与格式合规性统一为一个二元判定，如式(\ref{eq:reward-base})所示：
+\begin{equation}\label{eq:reward-base}
+  r_{\text{base}}(y, \hat{y}_i) =
+  \begin{cases}
+    1, & \text{if } \text{extract}(\hat{y}_i) = y \;\;\text{and}\;\; \text{format}(\hat{y}_i) = \texttt{True} \\
+    0, & \text{otherwise}
+  \end{cases}
+\end{equation}
+这种将正确性与格式合并为单一奖励信号的设计，相比将二者拆分为独立奖励项的做法$^{[ref]}$，其优势在于避免了格式违规但答案碰巧正确时产生的混淆信号——不满足格式要求的输出无法可靠地提取答案，因此一律视为不正确。
+
+\paragraph{基于难度感知的相对思考长度惩罚}
+
+基础正确性奖励仅提供了答案层面的二元监督信号，无法对模型的中间推理过程施加控制。然而在连续思维推理框架下，思考过程的长度直接关系到计算效率与推理质量之间的平衡：过短的思考可能导致推理不充分，过长的思考则带来不必要的计算开销。为此，本文设计了一种基于难度感知的相对思考长度惩罚机制，其核心思想是利用群组内正确率作为问题难度的隐式度量，自适应地调节长度惩罚的方向。
+
+在 GRPO 框架下，对每个问题 $x$，模型采样生成 $G$ 个输出 $\{\hat{y}_i\}_{i=1}^G$，其对应的思考阶段 Token 长度为 $\{l_i\}_{i=1}^G$，其中 $l_i$ 定义为第 $i$ 个输出中属于思考阶段（即答案标记之前）的有效 Token 数量。该机制引入长度惩罚系数 $\lambda$ 控制惩罚强度，正确率阈值 $p_{\text{cutoff}}$ 作为简单题与难题的分界线，以及最低思考长度门槛 $l_{\min}$ 用于过滤异常短的样本。此外，为使模型在训练初期先专注于学习基本格式和正确性，引入延迟启用步数 $T_{\text{delay}}$，在训练步 $t < T_{\text{delay}}$ 时长度惩罚不生效。
+
+长度惩罚的计算以群组为单位进行。首先定义达标样本集合 $\mathcal{E} = \{i \mid l_i \geq l_{\min}\}$，即思考长度不低于 $l_{\min}$ 的样本。若 $|\mathcal{E}| < 2$，则该群组缺乏足够的参照样本进行组内比较，所有样本的长度惩罚均为零。在此基础上计算达标集合的平均思考长度 $\bar{l}_{\mathcal{E}}$ 和思考长度极差 $\Delta_{\mathcal{E}}$，如式(\ref{eq:length-statistics})所示：
+\begin{equation}\label{eq:length-statistics}
+  \bar{l}_{\mathcal{E}} = \frac{1}{|\mathcal{E}|}\sum_{j \in \mathcal{E}} l_j, \qquad
+  \Delta_{\mathcal{E}} = \max_{j \in \mathcal{E}} l_j - \min_{j \in \mathcal{E}} l_j
+\end{equation}
+若 $\Delta_{\mathcal{E}}$ 趋近于零，表明群组内所有达标样本的思考长度几乎一致，无法进行有意义的相对比较，此时长度惩罚同样为零。
+
+随后利用群组内正确率进行难度感知。定义群组正确数 $n_{\text{correct}} = \sum_{i=1}^{G} \mathbf{1}[r_{\text{base}}(y, \hat{y}_i) > 0]$ 和最低正确数阈值 $n_{\min} = \max(2, \lfloor p_{\text{cutoff}} \cdot G \rfloor)$，并定义正确且达标的有效样本子集 $\mathcal{V} = \{i \mid i \in \mathcal{E} \;\text{and}\; r_{\text{base}}(y, \hat{y}_i) > 0\}$。根据 $n_{\text{correct}}$ 与 $n_{\min}$ 的关系，长度惩罚分为两种模式。
+
+当 $n_{\text{correct}} \geq n_{\min}$ 时，群组内大部分或全部输出均能给出正确答案，可以认为当前问题对模型而言较为简单。此时仅对有效子集 $\mathcal{V}$ 中思考过长的样本施加惩罚，鼓励模型以更精简的推理过程完成简单任务。计算 $\mathcal{V}$ 自身的统计量 $\bar{l}_{\mathcal{V}}$ 和 $\Delta_{\mathcal{V}}$，长度惩罚定义如式(\ref{eq:length-penalty-easy})所示：
+\begin{equation}\label{eq:length-penalty-easy}
+  r_{\text{len}}^{\text{easy}}(\hat{y}_i, l_i) =
+  \begin{cases}
+    \min\!\left(0,\; -\lambda \cdot \dfrac{l_i - \bar{l}_{\mathcal{V}}}{\Delta_{\mathcal{V}}}\right), & \text{if } i \in \mathcal{V} \\
+    0, & \text{otherwise}
+  \end{cases}
+\end{equation}
+其中 $\min(0, \cdot)$ 运算确保只保留负值。当 $l_i > \bar{l}_{\mathcal{V}}$ 时，分子为正，经取负后变为负值，被保留为惩罚；当 $l_i < \bar{l}_{\mathcal{V}}$ 时，结果为正值，被截断为零。这一"只罚不奖"的设计保证了长度信号始终作为惩罚项存在，不会与正确性奖励产生竞争，从而避免了模型为追求短思考的额外奖励而牺牲推理准确率的风险。
+
+当 $n_{\text{correct}} < n_{\min}$ 时，群组内仅有少部分输出正确，问题对模型而言具有较高难度。此时不应鼓励缩短思考，相反应防止思考过程发生坍缩。在该模式下，对有效子集 $\mathcal{V}$ 中思考过短的样本施加惩罚，使用全体达标样本 $\mathcal{E}$ 的统计量作为参照基准，如式(\ref{eq:length-penalty-hard})所示：
+\begin{equation}\label{eq:length-penalty-hard}
+  r_{\text{len}}^{\text{hard}}(\hat{y}_i, l_i) =
+  \begin{cases}
+    \min\!\left(0,\; -\lambda \cdot \dfrac{\bar{l}_{\mathcal{E}} - l_i}{\Delta_{\mathcal{E}}}\right), & \text{if } i \in \mathcal{V} \\
+    0, & \text{otherwise}
+  \end{cases}
+\end{equation}
+与简单题模式的关键区别在于分子部分变为 $\bar{l}_{\mathcal{E}} - l_i$：当 $l_i < \bar{l}_{\mathcal{E}}$ 时分子为正，经取负后变为负值，对过短的思考施加惩罚；而 $l_i > \bar{l}_{\mathcal{E}}$ 的样本不会被惩罚，因为在难题场景下更长的思考可能有助于提升推理质量。综合两种模式，相对思考长度惩罚统一表示如式(\ref{eq:length-penalty})所示：
+\begin{equation}\label{eq:length-penalty}
+  r_{\text{len}}(\hat{y}_i, l_i) =
+  \begin{cases}
+    r_{\text{len}}^{\text{easy}}(\hat{y}_i, l_i), & \text{if } n_{\text{correct}} \geq n_{\min} \\
+    r_{\text{len}}^{\text{hard}}(\hat{y}_i, l_i), & \text{if } n_{\text{correct}} < n_{\min}
+  \end{cases}
+\end{equation}
+
+\paragraph{最终奖励函数}
+
+将基础正确性奖励与相对思考长度惩罚相加，得到最终的复合奖励函数，如式(\ref{eq:final-reward})所示：
+\begin{equation}\label{eq:final-reward}
+  r(y, \hat{y}_i, l_i) = r_{\text{base}}(y, \hat{y}_i) + r_{\text{len}}(\hat{y}_i, l_i)
+\end{equation}
+该奖励函数的设计体现了一种自适应的训练策略：在训练初期，延迟机制保证模型先专注于学习正确格式和基本推理能力；在训练后期，长度惩罚机制根据问题的实际难度自动调整优化方向——对简单问题引导模型压缩冗余推理，对困难问题保护充分的思考过程不被坍缩。同时，全程"只罚不奖"的约束保证了准确率始终是策略优化的第一优先级，长度信号仅作为辅助调节手段，不会反向干扰正确性学习。
+
+\subsubsection{基于群组相对策略优化的强化学习训练算法}
+
+本小节将详细介绍强化学习训练的完整算法流程。本文采用群组相对策略优化（Group Relative Policy Optimization，GRPO）$^{[19]}$作为策略优化算法。GRPO 是近端策略优化（PPO）$^{[22]}$的一种变体，其核心改进在于消除了 PPO 中需要单独训练的价值网络（Critic），转而通过群组内的奖励归一化来估计优势函数，从而显著降低了训练的计算开销和工程复杂度。这种群组相对机制与上一小节所设计的难度感知奖励函数天然契合——两者均基于群组内的相对比较来产生训练信号。
+
+\paragraph{群组相对策略优化的基本原理}
+
+标准的策略梯度方法旨在最大化期望奖励的同时，通过 KL 散度约束防止策略偏离参考分布过远，其优化目标如式(\ref{eq:grpo-objective})所示：
+\begin{equation}\label{eq:grpo-objective}
+  \max_{\pi_\theta} \mathbb{E}_{x \sim \mathcal{D},\, \hat{y} \sim \pi_\theta(\cdot|x)} \big[r(x, \hat{y})\big] - \beta \, \mathbb{D}_{\text{KL}}\!\big[\pi_\theta(\cdot|x) \,\|\, \pi_{\text{ref}}(\cdot|x)\big]
+\end{equation}
+其中 $\pi_\theta$ 为当前策略模型，$\pi_{\text{ref}}$ 为参考模型（由训练初始时的模型参数冻结而得），$\beta$ 为 KL 系数，控制策略更新时对参考分布的依赖程度。添加 KL 散度约束的目的是防止策略模型偏离参考模型的分布过远，保持生成多样性，防止模式崩溃为少数高奖励输出。
+
+在 PPO 等传统策略梯度算法中，优势函数的估计通常需要额外训练一个价值网络，这引入了显著的计算开销和训练不稳定性。GRPO 通过一种更简洁的方式解决这一问题：对每个训练问题 $x$，当前策略采样生成 $G$ 个输出构成一个"群组" $\{\hat{y}_i\}_{i=1}^G$，并通过上一小节所述的奖励函数计算各输出的奖励 $\{r_i\}_{i=1}^G$。优势函数通过群组内的奖励归一化来估计，如式(\ref{eq:grpo-advantage})所示：
+\begin{equation}\label{eq:grpo-advantage}
+  A_i = \frac{r_i - \text{mean}(\{r_j\}_{j=1}^G)}{\text{std}(\{r_j\}_{j=1}^G) + \epsilon}
+\end{equation}
+其中 $\epsilon$ 为数值稳定性常数。该归一化机制使优势函数反映的是每个输出相对于同组其他输出的相对优劣，而非绝对的奖励值。正的优势值意味着该输出优于群组平均水平，应被鼓励；负的优势值则意味着该输出劣于群组平均水平，应被抑制。
+
+\paragraph{逐 Token 的损失函数}
+
+GRPO 的损失函数在 Token 级别上结合了策略梯度项和 KL 散度惩罚项。给定输出序列 $\hat{y}_i = (o_1, o_2, \dots, o_T)$ 中第 $t$ 个 Token $o_t$，当前策略在该位置的对数概率为 $\log \pi_\theta(o_t \mid x, o_{<t})$，参考策略的对数概率为 $\log \pi_{\text{ref}}(o_t \mid x, o_{<t})$。对数概率的计算遵循标准的自回归语言建模范式，如式(\ref{eq:token-log-prob})所示：
+\begin{equation}\label{eq:token-log-prob}
+  \log \pi_\theta(o_t \mid x, o_{<t}) = \log \text{softmax}(\mathbf{z}_t)[o_t] = z_{t,o_t} - \log\sum_{v \in \mathcal{V}} \exp(z_{t,v})
+\end{equation}
+其中 $\mathbf{z}_t$ 为模型在第 $t$ 个位置输出的 logits 向量，$\mathcal{V}$ 为词表。
+
+首先计算逐 Token 的反向 KL 散度。与常用的前向 KL 散度 $\mathbb{D}_{\text{KL}}(\pi_{\text{ref}} \| \pi_\theta)$ 不同，本文采用反向 KL 散度，其逐 Token 形式如式(\ref{eq:reverse-kl-token})所示：
+\begin{equation}\label{eq:reverse-kl-token}
+  D_{\text{KL}}^{(t)} = \exp\!\big(\delta_t\big) - \delta_t - 1, \qquad
+  \delta_t = \log \pi_{\text{ref}}(o_t \mid x, o_{<t}) - \log \pi_\theta(o_t \mid x, o_{<t})
+\end{equation}
+该形式具有良好的数学性质：当 $\pi_\theta$ 与 $\pi_{\text{ref}}$ 完全一致时 $D_{\text{KL}}^{(t)} = 0$，且对任意分布 $D_{\text{KL}}^{(t)} \geq 0$ 恒成立。
+
+在此基础上，综合策略梯度项和 KL 惩罚项，第 $i$ 个输出在第 $t$ 个 Token 上的逐 Token 损失如式(\ref{eq:token-loss})所示：
+\begin{equation}\label{eq:token-loss}
+  l_i^{(t)} = -\log \pi_\theta(o_t \mid x, o_{<t}) \cdot A_i + \beta \cdot D_{\text{KL}}^{(t)}
+\end{equation}
+其中第一项为策略梯度项，$A_i$ 为该输出的优势值。当 $A_i > 0$ 时，最小化损失等价于增大 $\log \pi_\theta$，即鼓励模型在该位置生成相同的 Token；当 $A_i < 0$ 时则抑制该生成。第二项为 KL 惩罚项，$\beta$ 控制当前策略与参考策略之间的偏离程度。最终对有效 Token 进行掩码加权平均，得到每个样本的损失和全局损失，如式(\ref{eq:masked-sequence-loss})所示：
+\begin{equation}\label{eq:masked-sequence-loss}
+  \mathcal{L}_i = \frac{\sum_{t=1}^{T} l_i^{(t)} \cdot m_t}{\sum_{t=1}^{T} m_t}, \qquad
+  \mathcal{L} = \frac{1}{B}\sum_{i=1}^{B} \mathcal{L}_i
+\end{equation}
+其中 $m_t \in \{0, 1\}$ 为完成序列的有效 Token 掩码，用于屏蔽填充位置，$B$ 为当前批次中的样本数量。
+
+\paragraph{训练流程的两阶段结构}
+
+本文的 GRPO 训练在每个迭代步中包含两个阶段：采样阶段和重放阶段，二者在计算模式上有本质区别。
+
+采样阶段在推理模式下执行，不记录梯度信息。对于每个训练问题 $x$，当前策略模型 $\pi_\theta$ 以自回归方式逐 Token 生成 $G$ 个完整输出。在生成过程中，第 3.3.1 节所述的连续思维混合机制同步运行：每生成一个 Token，模型将上一时刻的隐状态通过门控混合网络与当前 Token 嵌入融合，形成混合输入送入注意力层。采样结束后，除生成的 Token 序列 $\{\hat{y}_i\}_{i=1}^G$ 外，还需保存每个位置的连续思维嵌入 $\mathbf{H}_{\text{think}} \in \mathbb{R}^{B \times T \times d}$ 和思考阶段掩码 $\mathbf{M}_{\text{think}} \in \{0,1\}^{B \times T}$，供重放阶段使用。随后根据 3.3.2.1 节所述的奖励函数计算奖励，并通过式(\ref{eq:grpo-advantage})计算优势值。
+
+
+综合上述各部分，本文的强化学习训练算法可以统一表述为以下优化目标。记全部可学习参数为 $\Theta = \{\theta_{\text{LoRA}}, \mathbf{W}_r, \mathbf{W}_i, \Theta_\Lambda, \mathbf{W}_{\text{head}}, \mathbf{E}_{\text{gate}}\}$，其中 $\theta_{\text{LoRA}}$ 为 LoRA 适配器参数，其余为第 3.3.1 节所定义的 HRPO 各模块参数。对于从训练集 $\mathcal{D}$ 中采样的问题 $x$ 及其 $G$ 个采样输出，最终优化目标如式(\ref{eq:final-objective})所示：
+\begin{equation}\label{eq:final-objective}
+  \min_{\Theta} \; \mathcal{L}(\Theta) = \frac{1}{B} \sum_{i=1}^{B} \frac{1}{\sum_{t} m_t^{(i)}} \sum_{t=1}^{T_i} m_t^{(i)} \Big[ \underbrace{-\log \pi_\Theta(o_t \mid x, o_{<t}) \cdot A_i}_{\text{策略梯度项}} + \beta \cdot \underbrace{D_{\text{KL}}^{(t)}(\pi_{\text{ref}} \| \pi_\Theta)}_{\text{KL 约束项}} \Big]
+\end{equation}
+其中 $\pi_\Theta^{(t)}$ 为当前策略在第 $t$ 个位置的输出概率（由 HRPO 混合输入经 Transformer 解码得到），$\pi_{\text{ref}}^{(t)}$ 为参考策略的对应概率（不含连续思维注入和 LoRA 适配），$A_i$ 为基于难度感知奖励函数（式(\ref{eq:final-reward})）通过群组归一化（式(\ref{eq:grpo-advantage})）得到的优势值，$m_t^{(i)}$ 为第 $i$ 个输出的有效 Token 掩码。该目标函数的梯度 $\nabla_\Theta \mathcal{L}$ 通过反向传播同时流经语言模型和融合隐式推理的各模块，从而实现对全部可学习参数的端到端联合优化。
+
+
+
+
+
