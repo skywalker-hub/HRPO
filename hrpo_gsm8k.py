@@ -75,13 +75,19 @@ def main(args):
     else:
         gate_trainable_weight = gate_module.weight
     
+    def _init_sequential_head(seq_module):
+        for sub in seq_module.modules():
+            if isinstance(sub, nn.Linear):
+                nn.init.xavier_uniform_(sub.weight, gain=0.01)
+                if sub.bias is not None:
+                    nn.init.zeros_(sub.bias)
+    
     # ★★★ 真正生效的初始化 ★★★
-    # head 是 nn.Sequential，逐层初始化
-    for sub in head_actual.modules():
-        if isinstance(sub, nn.Linear):
-            nn.init.xavier_uniform_(sub.weight, gain=0.01)
-            if sub.bias is not None:
-                nn.init.zeros_(sub.bias)
+    # 必须同时初始化 default（训练用）和 original（推理/generate 用），
+    # 否则 generate 时 PEFT 切到 original 副本，其权重仍为随机值，导致 nan。
+    _init_sequential_head(head_actual)
+    if hasattr(head_module, 'modules_to_save') and hasattr(head_module.modules_to_save, 'original'):
+        _init_sequential_head(head_module.modules_to_save.original)
 
     ###门控初始化/监控
     token_gate_init = -2.0  # 只在这里控制 gate 初始化值（文件名/检查都引用该值）

@@ -129,13 +129,18 @@ def main(args):
     else:
         gate_trainable_weight = gate_module.weight
     
+    def _init_sequential_head(seq_module):
+        for sub in seq_module.modules():
+            if isinstance(sub, nn.Linear):
+                nn.init.zeros_(sub.weight)
+                if sub.bias is not None:
+                    nn.init.zeros_(sub.bias)
+    
     # ★★★ 真正生效的初始化 ★★★
-    # head 是 nn.Sequential，逐层初始化
-    for sub in head_actual.modules():
-        if isinstance(sub, nn.Linear):
-            nn.init.zeros_(sub.weight)
-            if sub.bias is not None:
-                nn.init.zeros_(sub.bias)
+    # 必须同时初始化 default（训练用）和 original（推理/generate 用）
+    _init_sequential_head(head_actual)
+    if hasattr(head_module, 'modules_to_save') and hasattr(head_module.modules_to_save, 'original'):
+        _init_sequential_head(head_module.modules_to_save.original)
     nn.init.constant_(gate_trainable_weight, -1.0)  # token_gate_matrix: 初始化为 -3, sigmoid(-3)≈0.047
     # ★★★ 修改上面的值来改变初始化 ★★★
 
