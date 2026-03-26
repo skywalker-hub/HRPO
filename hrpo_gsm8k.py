@@ -64,10 +64,11 @@ def main(args):
     head_module = model.model.model.thinking_residual_head
     gate_module = model.model.model.token_gate_matrix
     
+    # thinking_residual_head 现在是 nn.Sequential，需要获取其内部的实际模块
     if hasattr(head_module, 'modules_to_save'):
-        head_trainable_weight = head_module.modules_to_save.default.weight
+        head_actual = head_module.modules_to_save.default
     else:
-        head_trainable_weight = head_module.weight
+        head_actual = head_module
     
     if hasattr(gate_module, 'modules_to_save'):
         gate_trainable_weight = gate_module.modules_to_save.default.weight
@@ -75,7 +76,12 @@ def main(args):
         gate_trainable_weight = gate_module.weight
     
     # ★★★ 真正生效的初始化 ★★★
-    nn.init.xavier_uniform_(head_trainable_weight, gain=0.01) # thinking_residual_head: 初始化为 0
+    # head 是 nn.Sequential，逐层初始化
+    for sub in head_actual.modules():
+        if isinstance(sub, nn.Linear):
+            nn.init.xavier_uniform_(sub.weight, gain=0.01)
+            if sub.bias is not None:
+                nn.init.zeros_(sub.bias)
 
     ###门控初始化/监控
     token_gate_init = -2.0  # 只在这里控制 gate 初始化值（文件名/检查都引用该值）
@@ -99,14 +105,15 @@ def main(args):
     print("HRPO 新增模块初始值检查")
     print("=" * 60)
     
-    # 1. thinking_residual_head 初始值（期望全为 0）
-    head_weight = head_trainable_weight.data
+    # 1. thinking_residual_head 初始值（nn.Sequential，逐层打印）
     print(f"\n[thinking_residual_head]")
-    print(f"  形状: {head_weight.shape}")
-    print(f"  最小值: {head_weight.min().item():.6f}")
-    print(f"  最大值: {head_weight.max().item():.6f}")
-    print(f"  均值: {head_weight.mean().item():.6f}")
-    print(f"  是否全为0: {(head_weight == 0).all().item()}")
+    for name, sub in head_actual.named_modules():
+        if isinstance(sub, nn.Linear):
+            w = sub.weight.data
+            print(f"  {name or 'root'}.weight 形状: {w.shape}")
+            print(f"    最小值: {w.min().item():.6f}  最大值: {w.max().item():.6f}")
+            print(f"    均值: {w.mean().item():.6f}")
+            print(f"    是否全为0: {(w == 0).all().item()}")
     
     # 2. token_gate_matrix 初始值（期望）
     gate_weight = gate_trainable_weight.data

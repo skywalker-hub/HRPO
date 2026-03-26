@@ -514,19 +514,23 @@ def grpo_trainer_compute_loss(function_name, function):
             base_model = self.model
             while hasattr(base_model, 'model'):
                 base_model = base_model.model
-            # 记录 thinking_residual_head 的信息
+            # 记录 thinking_residual_head 的信息（nn.Sequential 兼容）
             if hasattr(base_model, 'thinking_residual_head'):
                 head_module = base_model.thinking_residual_head
-                head_weight = (
-                    head_module.modules_to_save.default.weight
+                head_actual = (
+                    head_module.modules_to_save.default
                     if hasattr(head_module, "modules_to_save")
-                    else head_module.weight
+                    else head_module
                 )
-                new_head_mean = head_weight.data.mean().item()
-                new_head_std = head_weight.data.std().item()
-                new_head_abs_max = head_weight.data.abs().max().item()
-                if head_weight.grad is not None:
-                    new_head_norm = head_weight.grad.norm().item()
+                all_weights = [p.data for p in head_actual.parameters()]
+                if all_weights:
+                    cat_w = torch.cat([w.flatten() for w in all_weights])
+                    new_head_mean = cat_w.mean().item()
+                    new_head_std = cat_w.std().item()
+                    new_head_abs_max = cat_w.abs().max().item()
+                    all_grads = [p.grad for p in head_actual.parameters() if p.grad is not None]
+                    if all_grads:
+                        new_head_norm = torch.cat([g.flatten() for g in all_grads]).norm().item()
             # 记录 token_gate_matrix 的信息
             if hasattr(base_model, 'token_gate_matrix'):
                 gate_module = base_model.token_gate_matrix
