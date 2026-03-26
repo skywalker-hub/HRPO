@@ -2513,9 +2513,11 @@ class FastLlamaModel:
                     model.model.model.thinking_residual_Lambda.modules_to_save.default.requires_grad_(True)
                 if "thinking_residual_head" in module:
                     assert(hasattr(model.model.model.thinking_residual_head, "modules_to_save"))
-                    model.model.model.thinking_residual_head.modules_to_save.default\
-                        .to(device = "cuda", dtype = new_dtype, non_blocking = True)
-                    model.model.model.thinking_residual_head.modules_to_save.default.requires_grad_(True)
+                    # nn.Sequential: 对所有子参数逐一设置 dtype 和 requires_grad
+                    head_default = model.model.model.thinking_residual_head.modules_to_save.default
+                    for param in head_default.parameters():
+                        param.data = param.data.to(device="cuda", dtype=new_dtype, non_blocking=True)
+                        param.requires_grad_(True)
                 if "token_gate_matrix" in module:
                     assert(hasattr(model.model.model.token_gate_matrix, "modules_to_save"))
                     model.model.model.token_gate_matrix.modules_to_save.default\

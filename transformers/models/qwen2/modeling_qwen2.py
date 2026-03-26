@@ -520,12 +520,20 @@ class Qwen2Model(Qwen2PreTrainedModel):
         self.thinking_residual_gate_i = nn.Linear(config.hidden_size, config.hidden_size)
         self.thinking_residual_Lambda = ThinkingResidualLambda(config)
         
-        # 新增：隐状态变换头，将原始隐状态投影到 thinking residual 空间
-        # 形状选择说明：
-        #   - (hidden_size, hidden_size): 保持维度，最大表达能力
-        #   - (hidden_size, hidden_size // 2): 降维，减少参数量
-        #   - (hidden_size, hidden_size // 4): 更激进降维
-        self.thinking_residual_head = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
+        # Projection Layer: 2层MLP替代单层线性变换
+        self.use_prj = getattr(config, 'use_prj', True)
+        self.prj_no_ln = getattr(config, 'prj_no_ln', False)
+        prj_dim = getattr(config, 'prj_dim', config.hidden_size)
+        if self.use_prj:
+            self.thinking_residual_head = nn.Sequential(
+                nn.Linear(config.hidden_size, prj_dim),
+                nn.GELU(),
+                nn.Linear(prj_dim, config.hidden_size),
+            )
+            if not self.prj_no_ln:
+                self.thinking_residual_head.add_module("ln", nn.LayerNorm(config.hidden_size))
+        else:
+            self.thinking_residual_head = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
         
         # 新增：Token 门控矩阵，基于离散 token ID 的可学习门控
         # 形状：(vocab_size, hidden_size)，与 embed_tokens 一致
@@ -563,13 +571,9 @@ class Qwen2Model(Qwen2PreTrainedModel):
         """
         
         
-        # ★ 关键修复：对 residual 做 RMSNorm 归一化后再送入 head
-        # 原因：residual 是 Transformer 隐藏状态，范数可达数百~数千，
-        # 导致 ∂L/∂W = grad^T × residual 中梯度被 ||residual|| 放大。
-        # 归一化后 ||residual_normed|| ≈ 1，梯度范数仅取决于 upstream grad。
-        residual_variance = residual.to(torch.float32).pow(2).mean(-1, keepdim=True)
-        residual_normed = residual * torch.rsqrt(residual_variance + eps)
-        h_residual = self.thinking_residual_head(residual_normed.to(residual.dtype))  # 连续信息向量
+        # MLP (Linear→GELU→Linear→LayerNorm) 内部已有输出归一化，
+        # 无需在输入端再做 RMSNorm，避免丢失幅度信息和额外开销。
+        h_residual = self.thinking_residual_head(residual)  # 连续信息向量
 
         r_t = torch.sigmoid(self.thinking_residual_gate_r(h_residual))
         i_t = torch.sigmoid(self.thinking_residual_gate_i(residual))  # 保留 i_t 定义，但不再使用

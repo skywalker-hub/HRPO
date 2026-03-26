@@ -114,14 +114,15 @@ def main(args):
     # 这里才是真正决定训练初始值的地方！
     import torch.nn as nn
     
-    # 获取真正可训练的权重（PEFT 包装后是 modules_to_save.default.weight）
+    # 获取真正可训练的模块（PEFT 包装后是 modules_to_save.default）
     head_module = model.model.model.thinking_residual_head
     gate_module = model.model.model.token_gate_matrix
     
+    # thinking_residual_head 现在是 nn.Sequential，取出实际模块
     if hasattr(head_module, 'modules_to_save'):
-        head_trainable_weight = head_module.modules_to_save.default.weight
+        head_actual = head_module.modules_to_save.default
     else:
-        head_trainable_weight = head_module.weight
+        head_actual = head_module
     
     if hasattr(gate_module, 'modules_to_save'):
         gate_trainable_weight = gate_module.modules_to_save.default.weight
@@ -129,7 +130,12 @@ def main(args):
         gate_trainable_weight = gate_module.weight
     
     # ★★★ 真正生效的初始化 ★★★
-    nn.init.zeros_(head_trainable_weight)           # thinking_residual_head: 初始化为 0
+    # head 是 nn.Sequential，逐层初始化
+    for sub in head_actual.modules():
+        if isinstance(sub, nn.Linear):
+            nn.init.zeros_(sub.weight)
+            if sub.bias is not None:
+                nn.init.zeros_(sub.bias)
     nn.init.constant_(gate_trainable_weight, -1.0)  # token_gate_matrix: 初始化为 -3, sigmoid(-3)≈0.047
     # ★★★ 修改上面的值来改变初始化 ★★★
 
