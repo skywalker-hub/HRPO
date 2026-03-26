@@ -520,20 +520,13 @@ class Qwen2Model(Qwen2PreTrainedModel):
         self.thinking_residual_gate_i = nn.Linear(config.hidden_size, config.hidden_size)
         self.thinking_residual_Lambda = ThinkingResidualLambda(config)
         
-        # Projection Layer: 2层MLP替代单层线性变换
-        self.use_prj = getattr(config, 'use_prj', True)
-        self.prj_no_ln = getattr(config, 'prj_no_ln', False)
+        # Projection Layer: 2层MLP替代单层线性变换，不含归一化层
         prj_dim = getattr(config, 'prj_dim', config.hidden_size)
-        if self.use_prj:
-            layers = [nn.LayerNorm(config.hidden_size)] if not self.prj_no_ln else []
-            layers += [
-                nn.Linear(config.hidden_size, prj_dim),
-                nn.GELU(),
-                nn.Linear(prj_dim, config.hidden_size),
-            ]
-            self.thinking_residual_head = nn.Sequential(*layers)
-        else:
-            self.thinking_residual_head = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
+        self.thinking_residual_head = nn.Sequential(
+            nn.Linear(config.hidden_size, prj_dim),
+            nn.GELU(),
+            nn.Linear(prj_dim, config.hidden_size),
+        )
         
         # 新增：Token 门控矩阵，基于离散 token ID 的可学习门控
         # 形状：(vocab_size, hidden_size)，与 embed_tokens 一致
@@ -571,9 +564,10 @@ class Qwen2Model(Qwen2PreTrainedModel):
         """
         
         
-        # MLP 内部 (LayerNorm→Linear→GELU→Linear) 已在输入端归一化，
-        # 防止 residual 的大范数导致中间层激活爆炸。
-        h_residual = self.thinking_residual_head(residual)  # 连续信息向量
+        # 手动 RMSNorm：压住 residual 的大范数，防止 MLP 中间层激活爆炸
+        residual_variance = residual.to(torch.float32).pow(2).mean(-1, keepdim=True)
+        residual_normed = residual * torch.rsqrt(residual_variance + eps)
+        h_residual = self.thinking_residual_head(residual_normed.to(residual.dtype))  # 连续信息向量
 
         r_t = torch.sigmoid(self.thinking_residual_gate_r(h_residual))
         i_t = torch.sigmoid(self.thinking_residual_gate_i(residual))  # 保留 i_t 定义，但不再使用
