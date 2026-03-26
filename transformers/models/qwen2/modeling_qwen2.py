@@ -525,13 +525,13 @@ class Qwen2Model(Qwen2PreTrainedModel):
         self.prj_no_ln = getattr(config, 'prj_no_ln', False)
         prj_dim = getattr(config, 'prj_dim', config.hidden_size)
         if self.use_prj:
-            self.thinking_residual_head = nn.Sequential(
+            layers = [nn.LayerNorm(config.hidden_size)] if not self.prj_no_ln else []
+            layers += [
                 nn.Linear(config.hidden_size, prj_dim),
                 nn.GELU(),
                 nn.Linear(prj_dim, config.hidden_size),
-            )
-            if not self.prj_no_ln:
-                self.thinking_residual_head.add_module("ln", nn.LayerNorm(config.hidden_size))
+            ]
+            self.thinking_residual_head = nn.Sequential(*layers)
         else:
             self.thinking_residual_head = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
         
@@ -571,8 +571,8 @@ class Qwen2Model(Qwen2PreTrainedModel):
         """
         
         
-        # MLP (Linear→GELU→Linear→LayerNorm) 内部已有输出归一化，
-        # 无需在输入端再做 RMSNorm，避免丢失幅度信息和额外开销。
+        # MLP 内部 (LayerNorm→Linear→GELU→Linear) 已在输入端归一化，
+        # 防止 residual 的大范数导致中间层激活爆炸。
         h_residual = self.thinking_residual_head(residual)  # 连续信息向量
 
         r_t = torch.sigmoid(self.thinking_residual_gate_r(h_residual))
