@@ -599,16 +599,22 @@ class Qwen2Model(Qwen2PreTrainedModel):
         discrete_thinking = a_t * embeds
         continuous_thinking = torch.sqrt(1 - a_t.pow(2) + eps) * continuous_bias
 
-        # 监控：计算离散/连续思维的模值比例（detach 避免影响梯度）
+        # 监控：计算离散/连续思维的模值比例 + 方向余弦相似度（detach 避免影响梯度）
         if self.training:
             with torch.no_grad():
                 discrete_norm = discrete_thinking.detach().norm(dim=-1).mean()
                 continuous_norm = continuous_thinking.detach().norm(dim=-1).mean()
-                # 比例: discrete / (discrete + continuous)，值域 [0, 1]
                 total_norm = discrete_norm + continuous_norm + eps
                 self._discrete_norm = discrete_norm.item()
                 self._continuous_norm = continuous_norm.item()
                 self._thinking_norm_ratio = continuous_norm.item() / total_norm.item()
+
+                # 逐 token 余弦相似度：展平 batch+seq 维度后计算
+                d_flat = discrete_thinking.detach().reshape(-1, discrete_thinking.size(-1))
+                c_flat = continuous_thinking.detach().reshape(-1, continuous_thinking.size(-1))
+                cosine_sim = torch.nn.functional.cosine_similarity(d_flat, c_flat, dim=-1)
+                self._thinking_cosine_mean = cosine_sim.mean().item()
+                self._thinking_cosine_std = cosine_sim.std().item()
 
         return discrete_thinking + continuous_thinking, a_t
 

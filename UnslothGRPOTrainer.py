@@ -1204,10 +1204,12 @@ class _UnslothGRPOTrainer(Trainer):
         token_gate_std = 0.0
         token_gate_sigmoid_mean = 0.0
         token_gate_std_batch = 0.0
-        # 获取 discrete/continuous thinking 模值比例
+        # 获取 discrete/continuous thinking 模值比例 + 余弦相似度
         discrete_norm = 0.0
         continuous_norm = 0.0
         thinking_norm_ratio = 0.0
+        thinking_cosine_mean = 0.0
+        thinking_cosine_std = 0.0
         try:
             base_model = self.model
             while hasattr(base_model, 'model'):
@@ -1266,10 +1268,12 @@ class _UnslothGRPOTrainer(Trainer):
                 
                 if gate_weight.grad is not None:
                     token_gate_grad_norm = gate_weight.grad.norm().item()
-            # 读取 discrete/continuous thinking 的模值比例
+            # 读取 discrete/continuous thinking 的模值比例 + 余弦相似度
             discrete_norm = getattr(base_model, '_discrete_norm', 0.0)
             continuous_norm = getattr(base_model, '_continuous_norm', 0.0)
             thinking_norm_ratio = getattr(base_model, '_thinking_norm_ratio', 0.0)
+            thinking_cosine_mean = getattr(base_model, '_thinking_cosine_mean', 0.0)
+            thinking_cosine_std = getattr(base_model, '_thinking_cosine_std', 0.0)
         except:
             pass
 
@@ -1294,6 +1298,8 @@ class _UnslothGRPOTrainer(Trainer):
             self._metrics[mode]["discrete_norm"].append(discrete_norm)
             self._metrics[mode]["continuous_norm"].append(continuous_norm)
             self._metrics[mode]["thinking_norm_ratio"].append(thinking_norm_ratio)
+            self._metrics[mode]["thinking_cosine_mean"].append(thinking_cosine_mean)
+            self._metrics[mode]["thinking_cosine_std"].append(thinking_cosine_std)
         else:
             self._metrics["embeds_ratio"].append(mean_embeds_ratio.item())
             self._metrics["hidden_ratio"].append(mean_hidden_ratio.item())
@@ -1314,6 +1320,8 @@ class _UnslothGRPOTrainer(Trainer):
             self._metrics["discrete_norm"].append(discrete_norm)
             self._metrics["continuous_norm"].append(continuous_norm)
             self._metrics["thinking_norm_ratio"].append(thinking_norm_ratio)
+            self._metrics["thinking_cosine_mean"].append(thinking_cosine_mean)
+            self._metrics["thinking_cosine_std"].append(thinking_cosine_std)
 
         ####训练断点：此处会失去调试追踪：
         return loss
