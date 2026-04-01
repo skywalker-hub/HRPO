@@ -562,7 +562,6 @@ class Qwen2Model(Qwen2PreTrainedModel):
             a_t: 衰减系数
         """
         
-        
         # ★ 关键修复：对 residual 做 RMSNorm 归一化后再送入 head
         # 原因：residual 是 Transformer 隐藏状态，范数可达数百~数千，
         # 导致 ∂L/∂W = grad^T × residual 中梯度被 ||residual|| 放大。
