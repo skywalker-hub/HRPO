@@ -4,7 +4,6 @@ from unsloth import FastLanguageModel, PatchFastRL
 PatchFastRL("GRPO", FastLanguageModel)
 
 import os
-import json
 import argparse
 import torch
 from trl import GRPOConfig, GRPOTrainer
@@ -15,20 +14,8 @@ from utils import *
 os.environ["WANDB_PROJECT"] = "latent-reasoning"
 
 
-def preprocess_math(split="train", chunk_size=1000, root='../MATH') -> Dataset:
-    problems, solutions = [], []
-    for folder in os.listdir(os.path.join(root, split)):
-        for file in os.listdir(os.path.join(root, split, folder)):
-            if file.endswith('.json'):
-                with open(os.path.join(root, split, folder, file), 'r') as f:
-                    entry = json.load(f)
-                problems.append(entry['problem'])
-                solutions.append(entry['solution'])
-    
-    dataset = Dataset.from_dict({
-        'problem': problems,
-        'solution': solutions,
-    })
+def preprocess_math(split="train", chunk_size=1000) -> Dataset:
+    dataset = load_dataset('hendrycks/competition_math', split=split)
     return dataset.map(process_math, batched=True, 
                        batch_size=chunk_size, load_from_cache_file=False)
 
@@ -154,7 +141,7 @@ def main(args):
         output_dir = exp_name,
     )
 
-    dataset = preprocess_math('train', chunk_size=500, root=args.dataset_root)
+    dataset = preprocess_math('train', chunk_size=500)
     trainer = GRPOTrainer(
         model = model,
         processing_class = tokenizer,
@@ -234,7 +221,6 @@ if __name__ == "__main__":
     parser.add_argument("--max_prompt_length", type=int, default=1024)
     parser.add_argument("--max_completion_length", type=int, default=1024)
 
-    parser.add_argument("--dataset_root", type=str, default="../MATH")
     parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-1.5B-Instruct")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
