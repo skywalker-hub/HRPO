@@ -4,7 +4,6 @@ from unsloth import FastLanguageModel, PatchFastRL
 PatchFastRL("GRPO", FastLanguageModel)
 
 import os
-import json
 import argparse
 import torch
 from trl import GRPOConfig, GRPOTrainer
@@ -15,11 +14,18 @@ from utils import *
 os.environ["WANDB_PROJECT"] = "latent-reasoning"
 
 
-def preprocess_mmlu(chunk_size=1000, root='../MMLU_Train_Merged') -> Dataset:
-    dataset = Dataset.load_from_disk(root)
-    processed = dataset.map(process_mmlu, batched=True, 
-                            batch_size=chunk_size, load_from_cache_file=False)
-    return processed
+def preprocess_arc(split="train", chunk_size=1000) -> Dataset:
+    dataset = load_dataset('allenai/ai2_arc', 'ARC-Challenge')[split]
+
+    def arc_to_mmlu_format(example):
+        labels = example['choices']['label']
+        example['choices'] = example['choices']['text']
+        example['answer'] = labels.index(example['answerKey'])
+        return example
+
+    dataset = dataset.map(arc_to_mmlu_format, load_from_cache_file=False)
+    return dataset.map(process_mmlu, batched=True,
+                       batch_size=chunk_size, load_from_cache_file=False)
 
 
 def main(args):
@@ -82,7 +88,7 @@ def main(args):
     print(f"  thinking_residual_head: 使用 {'modules_to_save.default' if hasattr(head_module, 'modules_to_save') else 'weight'}")
     print(f"  token_gate_matrix: 使用 {'modules_to_save.default' if hasattr(gate_module, 'modules_to_save') else 'weight'}")
 
-    exp_name = (f"./main01.base/{args.model_name.split('/')[-1]}-mmlu-group{args.group_size}"
+    exp_name = (f"./main01.base/{args.model_name.split('/')[-1]}-arc-group{args.group_size}"
                 f"-lora{args.lora_rank}-lr{args.lr_token_gate_matrix}-init{token_gate_init:g}"
                 f"-rmin{args.residual_r_min}-temp{args.temperature}")
     if os.path.exists(exp_name) and len(os.listdir(exp_name)) > 0:
@@ -142,7 +148,7 @@ def main(args):
         output_dir = exp_name,
     )
 
-    dataset = preprocess_mmlu(chunk_size=500, root=args.dataset_root)
+    dataset = preprocess_arc('train', chunk_size=500)
     trainer = GRPOTrainer(
         model = model,
         processing_class = tokenizer,
@@ -222,7 +228,6 @@ if __name__ == "__main__":
     parser.add_argument("--max_prompt_length", type=int, default=1024)
     parser.add_argument("--max_completion_length", type=int, default=1024)
 
-    parser.add_argument("--dataset_root", type=str, default="../MMLU_Train_Merged")
     parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-1.5B-Instruct")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
