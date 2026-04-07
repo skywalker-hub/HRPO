@@ -15,7 +15,12 @@ os.environ["WANDB_PROJECT"] = "latent-reasoning"
 
 
 def preprocess_arc(split="train", chunk_size=1000, root='allenai/ai2_arc') -> Dataset:
-    dataset = load_dataset(root, 'ARC-Challenge')[split]
+    import os
+    parquet_path = os.path.join(root, 'ARC-Challenge')
+    if os.path.isdir(parquet_path):
+        dataset = load_dataset('parquet', data_dir=parquet_path, split=split)
+    else:
+        dataset = load_dataset(root, 'ARC-Challenge')[split]
 
     def arc_to_mmlu_format(example):
         labels = example['choices']['label']
@@ -228,7 +233,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_prompt_length", type=int, default=1024)
     parser.add_argument("--max_completion_length", type=int, default=1024)
 
-    parser.add_argument("--dataset_root", type=str, default="~/.cache/modelscope/hub/datasets/allenai/ai2_arc")
+    parser.add_argument("--dataset_root", type=str, default="allenai/ai2_arc")
     parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-1.5B-Instruct")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
