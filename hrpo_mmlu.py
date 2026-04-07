@@ -14,8 +14,8 @@ from utils import *
 os.environ["WANDB_PROJECT"] = "latent-reasoning"
 
 
-def preprocess_arc(split="train", chunk_size=1000) -> Dataset:
-    dataset = load_dataset('allenai/ai2_arc', 'ARC-Challenge')[split]
+def preprocess_arc(split="train", chunk_size=1000, root='allenai/ai2_arc') -> Dataset:
+    dataset = load_dataset(root, 'ARC-Challenge')[split]
 
     def arc_to_mmlu_format(example):
         labels = example['choices']['label']
@@ -148,7 +148,7 @@ def main(args):
         output_dir = exp_name,
     )
 
-    dataset = preprocess_arc('train', chunk_size=500)
+    dataset = preprocess_arc('train', chunk_size=500, root=args.dataset_root)
     trainer = GRPOTrainer(
         model = model,
         processing_class = tokenizer,
@@ -228,6 +228,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_prompt_length", type=int, default=1024)
     parser.add_argument("--max_completion_length", type=int, default=1024)
 
+    parser.add_argument("--dataset_root", type=str, default="~/.cache/modelscope/hub/datasets/allenai/ai2_arc")
     parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-1.5B-Instruct")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
