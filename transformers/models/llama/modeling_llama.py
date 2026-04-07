@@ -542,6 +542,12 @@ class LlamaModel(LlamaPreTrainedModel):
         
         # 新增：隐状态变换头，将原始隐状态投影到 thinking residual 空间
         self.thinking_residual_head = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
+        
+        # 新增：Token 门控矩阵，基于离散 token ID 的可学习门控
+        # 形状：(vocab_size, hidden_size)，与 embed_tokens 一致
+        # 注意：这里的初始化会被 post_init() 中的 _init_weights() 覆盖
+        # 真正的初始化在训练脚本中对 modules_to_save.default.weight 进行
+        self.token_gate_matrix = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=self.padding_idx)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -552,12 +558,64 @@ class LlamaModel(LlamaPreTrainedModel):
     def set_input_embeddings(self, value):
         self.embed_tokens = value
 
-    def thinking_residual(self, embeds, residual, eps=1e-8):
-        r_t = torch.sigmoid(self.thinking_residual_gate_r(embeds))
-        i_t = torch.sigmoid(self.thinking_residual_gate_i(embeds))
+    def thinking_residual(self, embeds, residual, input_ids=None, eps=1e-8):
+        """
+        混合推理残差计算函数（与 Qwen2 对齐）
+        
+        Args:
+            embeds: 当前 token 的嵌入向量 (batch, seq_len, hidden_size)
+            residual: 上一步的隐藏状态 (batch, seq_len, hidden_size)
+            input_ids: 当前 token 的 ID (batch, seq_len)，用于查询门控矩阵
+            eps: 数值稳定性参数
+        """
+        
+        # 对 residual 做 RMSNorm 归一化后再送入 head
+        residual_variance = residual.to(torch.float32).pow(2).mean(-1, keepdim=True)
+        residual_normed = residual * torch.rsqrt(residual_variance + eps)
+        h_residual = self.thinking_residual_head(residual_normed.to(residual.dtype))
+
+        r_t = torch.sigmoid(self.thinking_residual_gate_r(h_residual))
+        i_t = torch.sigmoid(self.thinking_residual_gate_i(residual))
         a_t = self.thinking_residual_Lambda(r_t)
-        h_residual = self.thinking_residual_head(residual)  # ← 现在训练时也会被调用！
-        return a_t * embeds + torch.sqrt(1 - a_t.pow(2) + eps) * (i_t * h_residual), a_t
+
+        # 基于 token ID 的离散门控
+        if input_ids is not None:
+            if self.training and not hasattr(self, '_gate_debug_printed'):
+                print(f"\n[DEBUG] token_gate_matrix called!")
+                print(f"  input_ids shape: {input_ids.shape}")
+                print(f"  input_ids sample: {input_ids.flatten()[:10].tolist()}")
+                self._gate_debug_printed = True
+            
+            gate_logits = self.token_gate_matrix(input_ids)
+            g_k = torch.sigmoid(gate_logits)
+        else:
+            if self.training and not hasattr(self, '_gate_none_debug_printed'):
+                print(f"\n[WARNING] token_gate_matrix NOT called! input_ids is None")
+                self._gate_none_debug_printed = True
+            g_k = torch.ones_like(h_residual)
+        
+        continuous_bias = h_residual * g_k
+        
+        discrete_thinking = a_t * embeds
+        continuous_thinking = torch.sqrt(1 - a_t.pow(2) + eps) * continuous_bias
+
+        # 监控：计算离散/连续思维的模值比例 + 方向余弦相似度
+        if self.training:
+            with torch.no_grad():
+                discrete_norm = discrete_thinking.detach().norm(dim=-1).mean()
+                continuous_norm = continuous_thinking.detach().norm(dim=-1).mean()
+                total_norm = discrete_norm + continuous_norm + eps
+                self._discrete_norm = discrete_norm.item()
+                self._continuous_norm = continuous_norm.item()
+                self._thinking_norm_ratio = continuous_norm.item() / total_norm.item()
+
+                d_flat = discrete_thinking.detach().reshape(-1, discrete_thinking.size(-1))
+                c_flat = continuous_thinking.detach().reshape(-1, continuous_thinking.size(-1))
+                cosine_sim = torch.nn.functional.cosine_similarity(d_flat, c_flat, dim=-1)
+                self._thinking_cosine_mean = cosine_sim.mean().item()
+                self._thinking_cosine_std = cosine_sim.std().item()
+
+        return discrete_thinking + continuous_thinking, a_t
 
     @add_start_docstrings_to_model_forward(LLAMA_INPUTS_DOCSTRING)
     def forward(
