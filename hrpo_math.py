@@ -4,6 +4,7 @@ from unsloth import FastLanguageModel, PatchFastRL
 PatchFastRL("GRPO", FastLanguageModel)
 
 import os
+import json
 import argparse
 import torch
 from trl import GRPOConfig, GRPOTrainer
@@ -14,8 +15,20 @@ from utils import *
 os.environ["WANDB_PROJECT"] = "latent-reasoning"
 
 
-def preprocess_math(split="train", chunk_size=1000) -> Dataset:
-    dataset = load_dataset('hendrycks/competition_math', split=split)
+def preprocess_math(split="train", chunk_size=1000, root='../MATH') -> Dataset:
+    problems, solutions = [], []
+    for folder in os.listdir(os.path.join(root, split)):
+        for file in os.listdir(os.path.join(root, split, folder)):
+            if file.endswith('.json'):
+                with open(os.path.join(root, split, folder, file), 'r') as f:
+                    entry = json.load(f)
+                problems.append(entry['problem'])
+                solutions.append(entry['solution'])
+    
+    dataset = Dataset.from_dict({
+        'problem': problems,
+        'solution': solutions,
+    })
     return dataset.map(process_math, batched=True, 
                        batch_size=chunk_size, load_from_cache_file=False)
 
@@ -44,8 +57,8 @@ def main(args):
             "thinking_residual_gate_r",
             "thinking_residual_gate_i",
             "thinking_residual_Lambda",
-            "thinking_residual_head",
-            "token_gate_matrix",
+            "thinking_residual_head",  # 新增: 隐状态变换头
+            "token_gate_matrix",  # 新增: Token 门控矩阵
         ], 
         lora_alpha = args.lora_rank * 2,
         use_gradient_checkpointing = "unsloth",
@@ -57,8 +70,10 @@ def main(args):
     
     # ============ 【真正生效的初始化】 ============
     # 注意：模型定义中的初始化会被 post_init() 覆盖，PEFT 包装后需要初始化 modules_to_save.default
+    # 这里才是真正决定训练初始值的地方！
     import torch.nn as nn
     
+    # 获取真正可训练的权重（PEFT 包装后是 modules_to_save.default.weight）
     head_module = model.model.model.thinking_residual_head
     gate_module = model.model.model.token_gate_matrix
     
@@ -72,15 +87,19 @@ def main(args):
     else:
         gate_trainable_weight = gate_module.weight
     
-    nn.init.xavier_uniform_(head_trainable_weight, gain=0.01)
+    # ★★★ 真正生效的初始化 ★★★
+    nn.init.xavier_uniform_(head_trainable_weight, gain=0.01) # thinking_residual_head: 初始化为 0
 
-    token_gate_init = -2.0
-    nn.init.constant_(gate_trainable_weight, token_gate_init)
+    ###门控初始化/监控
+    token_gate_init = -2.0  # 只在这里控制 gate 初始化值（文件名/检查都引用该值）
+    nn.init.constant_(gate_trainable_weight, token_gate_init)  # token_gate_matrix: 初始化为 -3, sigmoid(-3)≈0.047
+    # ★★★ 修改上面的值来改变初始化 ★★★
     
     print(f"\n初始化完成:")
     print(f"  thinking_residual_head: 使用 {'modules_to_save.default' if hasattr(head_module, 'modules_to_save') else 'weight'}")
     print(f"  token_gate_matrix: 使用 {'modules_to_save.default' if hasattr(gate_module, 'modules_to_save') else 'weight'}")
 
+    ###保存文件名（init 统一使用上面 token_gate_init）
     exp_name = (f"./main01.base/{args.model_name.split('/')[-1]}-math-group{args.group_size}"
                 f"-lora{args.lora_rank}-lr{args.lr_token_gate_matrix}-init{token_gate_init:g}"
                 f"-rmin{args.residual_r_min}-temp{args.temperature}")
@@ -93,6 +112,7 @@ def main(args):
     print("HRPO 新增模块初始值检查")
     print("=" * 60)
     
+    # 1. thinking_residual_head 初始值（期望全为 0）
     head_weight = head_trainable_weight.data
     print(f"\n[thinking_residual_head]")
     print(f"  形状: {head_weight.shape}")
@@ -101,6 +121,7 @@ def main(args):
     print(f"  均值: {head_weight.mean().item():.6f}")
     print(f"  是否全为0: {(head_weight == 0).all().item()}")
     
+    # 2. token_gate_matrix 初始值（期望）
     gate_weight = gate_trainable_weight.data
     print(f"\n[token_gate_matrix]")
     print(f"  形状: {gate_weight.shape}")
@@ -141,7 +162,7 @@ def main(args):
         output_dir = exp_name,
     )
 
-    dataset = preprocess_math('train', chunk_size=500)
+    dataset = preprocess_math('train', chunk_size=500, root=args.dataset_root)
     trainer = GRPOTrainer(
         model = model,
         processing_class = tokenizer,
@@ -155,8 +176,8 @@ def main(args):
         trainer,
         args.lr_residual_gate,
         args.lr_residual_Lambda,
-        args.lr_residual_head,
-        args.lr_token_gate_matrix,
+        args.lr_residual_head,  # 新增: 隐状态变换头的学习率
+        args.lr_token_gate_matrix,  # 新增: Token 门控矩阵的学习率
     )
     
     # ============ 调试：检查 token_gate_matrix 是否被正确加入优化器 ============
@@ -164,6 +185,7 @@ def main(args):
     print("调试：检查参数是否在优化器中")
     print("=" * 60)
     
+    # 检查所有参数名
     print("\n【所有包含 'token_gate' 的参数】")
     found_gate = False
     for name, param in model.named_parameters():
@@ -174,6 +196,7 @@ def main(args):
     if not found_gate:
         print("  ⚠️ 没有找到任何包含 'token_gate' 的参数！")
     
+    # 检查优化器中的参数组
     print("\n【优化器参数组】")
     trainer.create_optimizer()
     for i, group in enumerate(trainer.optimizer.param_groups):
@@ -181,6 +204,7 @@ def main(args):
         total_params = sum(p.numel() for p in group['params'])
         print(f"  Group {i}: lr={group['lr']:.2e}, params={param_count}, total={total_params:,}")
         
+        # 检查是否有 token_gate_matrix 参数
         for p in group['params']:
             for name, param in model.named_parameters():
                 if param is p and "token_gate" in name:
@@ -203,8 +227,10 @@ if __name__ == "__main__":
     parser.add_argument("--lr_residual_gate", type=float, default=1e-4)
     parser.add_argument("--lr_residual_Lambda", type=float, default=1e-3)
 
-    parser.add_argument("--lr_residual_head", type=float, default=1e-4)
-    parser.add_argument("--lr_token_gate_matrix", type=float, default=1e-2)
+    # 新增: 隐状态变换头的学习率
+    parser.add_argument("--lr_residual_head", type=float, default=1e-4)  
+    # 新增: Token 门控矩阵的学习率 (提高以克服bfloat16精度问题)
+    parser.add_argument("--lr_token_gate_matrix", type=float, default=1e-2)  
     
     parser.add_argument("--weight_decay", type=float, default=0.1)
     parser.add_argument("--warmup_ratio", type=float, default=0.1)
@@ -221,6 +247,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_prompt_length", type=int, default=1024)
     parser.add_argument("--max_completion_length", type=int, default=1024)
 
+    parser.add_argument("--dataset_root", type=str, default="../MATH")
     parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-1.5B-Instruct")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
