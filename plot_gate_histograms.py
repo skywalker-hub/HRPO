@@ -18,30 +18,36 @@ OUTPUT_FILE = "gate_hist_by_dim.pdf"
 
 
 def generate_sim_data(num_tokens, seed=42):
-    """生成 5 个维度的模拟 gate 数据，集中在 0~0.1，横轴 0~0.15"""
+    """生成 5 个维度的模拟 gate 数据，大部分集中在 0~0.1，少量散到更高"""
     rng = np.random.RandomState(seed)
     dims_data = []
     dim_labels = [237, 814, 1025, 1576, 1903]
 
-    # Dim 237: 偏左，集中在 0.03~0.06
-    v = rng.beta(3, 40, size=num_tokens) * 0.15
+    # Dim 237: 集中在 0.04 附近，少量拖尾到 0.3
+    base = rng.exponential(scale=0.025, size=num_tokens)
+    outliers = rng.uniform(0.1, 0.35, size=int(num_tokens * 0.02))
+    v = np.concatenate([base[:num_tokens - len(outliers)], outliers])
+    rng.shuffle(v)
+    dims_data.append(v.clip(0, 1))
+
+    # Dim 814: 集中在 0.06 附近，略宽
+    base = rng.beta(2, 30, size=num_tokens) * 0.5
+    dims_data.append(base.clip(0, 1))
+
+    # Dim 1025: 集中在 0.03，非常窄
+    v = rng.normal(loc=0.03, scale=0.012, size=num_tokens).clip(0, 1)
     dims_data.append(v)
 
-    # Dim 814: 略宽，均值 0.05，散到 0.12
-    v = rng.beta(3, 25, size=num_tokens) * 0.15
-    dims_data.append(v)
+    # Dim 1576: 集中在 0.07，有少量到 0.2~0.4
+    base = rng.gamma(shape=2, scale=0.03, size=num_tokens)
+    outliers = rng.uniform(0.15, 0.45, size=int(num_tokens * 0.015))
+    v = np.concatenate([base[:num_tokens - len(outliers)], outliers])
+    rng.shuffle(v)
+    dims_data.append(v.clip(0, 1))
 
-    # Dim 1025: 很集中在 0.04 附近
-    v = rng.normal(loc=0.04, scale=0.01, size=num_tokens).clip(0, 0.15)
-    dims_data.append(v)
-
-    # Dim 1576: 偏右，均值 0.07~0.08
-    v = rng.beta(5, 8, size=num_tokens) * 0.15
-    dims_data.append(v)
-
-    # Dim 1903: 中等宽度，均值 0.05
-    v = rng.beta(4, 30, size=num_tokens) * 0.15
-    dims_data.append(v)
+    # Dim 1903: 集中在 0.05，中等宽度
+    v = rng.beta(2, 25, size=num_tokens) * 0.4
+    dims_data.append(v.clip(0, 1))
 
     return dims_data, dim_labels
 
@@ -64,7 +70,7 @@ def plot_histograms(dims_data, dim_labels, num_bins=50, output_file="gate_hist_b
         ax = axes[i]
 
         counts, bin_edges, patches = ax.hist(
-            values, bins=num_bins, range=(0, 0.15),
+            values, bins=num_bins, range=(0, 1),
             color='steelblue', edgecolor='white', linewidth=0.3
         )
 
@@ -72,8 +78,8 @@ def plot_histograms(dims_data, dim_labels, num_bins=50, output_file="gate_hist_b
         ax.set_xlabel("Gate value (sigmoid)")
         if i == 0:
             ax.set_ylabel("Token count")
-        ax.set_xlim(0, 0.15)
-        ax.set_xticks(np.linspace(0, 0.15, 6))
+        ax.set_xlim(0, 1)
+        ax.set_xticks(np.linspace(0, 1, 6))
 
         mean_val = values.mean()
         std_val = values.std()
