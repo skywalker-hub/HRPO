@@ -68,39 +68,47 @@ def load_gate_matrix(checkpoint_path):
     return gate_weight
 
 
-def plot_histograms_by_dimension(gate_weight, num_dims=5, num_bins=50, seed=42, output_file="gate_hist_by_dim.pdf"):
+def find_top_varying_dims(gate_weight, top_k=5):
+    """逐列计算标准差，找出变化最大的 top_k 个维度（省内存）"""
+    hidden_size = gate_weight.shape[1]
+    stds = torch.zeros(hidden_size)
+    for d in range(hidden_size):
+        stds[d] = gate_weight[:, d].float().std()
+    top_dims = stds.topk(top_k)
+    return top_dims.indices.tolist(), top_dims.values.tolist()
+
+
+def plot_histograms_by_dimension(gate_weight, num_dims=5, num_bins=100, seed=42, output_file="gate_hist_by_dim.pdf"):
     """
-    固定维度，画不同 token 在该维度上的 gate 值直方图。
-    每个维度一张子图，复合排版。
+    选变化最大的维度，画不同 token 在该维度上的 gate 值直方图。
+    每个维度一张子图，x 轴独立适配，复合排版。
     """
     vocab_size, hidden_size = gate_weight.shape
     print(f"Gate matrix shape: vocab_size={vocab_size}, hidden_size={hidden_size}")
 
-    rng = np.random.RandomState(seed)
-    selected_dims = sorted(rng.choice(hidden_size, size=num_dims, replace=False))
-    print(f"Selected dimensions: {selected_dims}")
+    print("Finding top varying dimensions...")
+    selected_dims, dim_stds = find_top_varying_dims(gate_weight, top_k=num_dims)
+    for d, s in zip(selected_dims, dim_stds):
+        print(f"  Dim {d}: std = {s:.8f}")
 
     mpl.rcParams.update({
         'font.size': 9,
         'axes.titlesize': 10,
         'axes.labelsize': 9,
-        'xtick.labelsize': 8,
+        'xtick.labelsize': 7,
         'ytick.labelsize': 8,
     })
 
-    fig, axes = plt.subplots(1, num_dims, figsize=(3.8 * num_dims, 3.2), squeeze=False)
+    fig, axes = plt.subplots(1, num_dims, figsize=(3.8 * num_dims, 3.5), squeeze=False)
     axes = axes[0]
 
-    all_values = []
-    for dim_idx in selected_dims:
-        v = gate_weight[:, dim_idx].float().numpy()
-        all_values.append(v)
-
-    x_lo = -2.0
-    x_hi = -1.99988
-
-    for i, (dim_idx, values) in enumerate(zip(selected_dims, all_values)):
+    for i, dim_idx in enumerate(selected_dims):
         ax = axes[i]
+        values = gate_weight[:, dim_idx].float().numpy()
+
+        p_lo, p_hi = np.percentile(values, [0.1, 99.9])
+        pad = max((p_hi - p_lo) * 0.1, 1e-8)
+        x_lo, x_hi = p_lo - pad, p_hi + pad
 
         ax.hist(values, bins=num_bins, range=(x_lo, x_hi), color='steelblue', edgecolor='white', linewidth=0.3)
         ax.set_title(f"Dim {dim_idx}")
@@ -108,18 +116,20 @@ def plot_histograms_by_dimension(gate_weight, num_dims=5, num_bins=50, seed=42, 
         if i == 0:
             ax.set_ylabel("Token count")
         ax.set_xlim(x_lo, x_hi)
+
+        ticks = np.linspace(x_lo, x_hi, 5)
+        ax.set_xticks(ticks)
         ax.xaxis.set_major_formatter(ticker.FormatStrFormatter('%.8f'))
-        ax.set_xticks(np.linspace(x_lo, x_hi, 5))
-        ax.tick_params(axis='x', rotation=45)
+        ax.tick_params(axis='x', rotation=55)
 
         mean_val = values.mean()
         std_val = values.std()
-        ax.axvline(mean_val, color='red', linestyle='--', linewidth=1, label=f'μ={mean_val:.5f}')
-        ax.legend(fontsize=7, loc='upper right')
-        ax.text(0.95, 0.85, f'σ={std_val:.6f}', transform=ax.transAxes,
-                fontsize=7, ha='right', va='top')
+        ax.axvline(mean_val, color='red', linestyle='--', linewidth=1, label=f'μ={mean_val:.8f}')
+        ax.legend(fontsize=6, loc='upper right')
+        ax.text(0.95, 0.85, f'σ={std_val:.8f}', transform=ax.transAxes,
+                fontsize=6, ha='right', va='top')
 
-    fig.suptitle("Raw Gate Distribution per Dimension (across all tokens)", fontsize=11, y=1.02)
+    fig.suptitle("Gate Distribution per Dimension — Top Varying (across all tokens)", fontsize=11, y=1.02)
     fig.tight_layout()
     fig.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"Figure saved to: {output_file}")
