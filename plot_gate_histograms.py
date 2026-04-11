@@ -75,7 +75,7 @@ def plot_histograms_by_dimension(gate_weight, num_dims=5, num_bins=50, seed=42, 
     vocab_size, hidden_size = gate_weight.shape
     print(f"Gate matrix shape: vocab_size={vocab_size}, hidden_size={hidden_size}")
 
-    sigmoid_gate = torch.sigmoid(gate_weight).numpy()
+    sigmoid_gate = torch.sigmoid(gate_weight.float()).numpy()
 
     rng = np.random.RandomState(seed)
     selected_dims = sorted(rng.choice(hidden_size, size=num_dims, replace=False))
