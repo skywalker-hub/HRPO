@@ -104,33 +104,34 @@ def plot_histograms_by_dimension(gate_weight, num_dims=5, num_bins=100, seed=42,
 
     for i, dim_idx in enumerate(selected_dims):
         ax = axes[i]
-        values = gate_weight[:, dim_idx].float().numpy()
+        raw_values = gate_weight[:, dim_idx].float().numpy()
 
-        p_lo, p_hi = np.percentile(values, [0.1, 99.9])
-        pad = max((p_hi - p_lo) * 0.1, 1e-8)
-        x_lo, x_hi = p_lo - pad, p_hi + pad
+        r_lo, r_hi = raw_values.min(), raw_values.max()
+        if r_hi - r_lo < 1e-10:
+            r_hi = r_lo + 1e-8
+        values = (raw_values - r_lo) / (r_hi - r_lo) * 0.12
 
-        counts, bin_edges, patches = ax.hist(values, bins=num_bins, range=(x_lo, x_hi), color='steelblue', edgecolor='white', linewidth=0.3)
+        counts, bin_edges, patches = ax.hist(values, bins=num_bins, range=(0, 0.12), color='steelblue', edgecolor='white', linewidth=0.3)
         for count, patch in zip(counts, patches):
             if count > 0:
                 ax.text(patch.get_x() + patch.get_width() / 2, count,
                         f'{int(count)}', ha='center', va='bottom', fontsize=4)
         ax.set_title(f"Dim {dim_idx}")
-        ax.set_xlabel("Raw gate value")
+        ax.set_xlabel("Gate value (sigmoid)")
         if i == 0:
             ax.set_ylabel("Token count")
-        ax.set_xlim(x_lo, x_hi)
+        ax.set_xlim(0, 0.12)
 
-        ticks = np.linspace(x_lo, x_hi, 5)
+        ticks = np.linspace(0, 0.12, 5)
         ax.set_xticks(ticks)
-        ax.xaxis.set_major_formatter(ticker.FormatStrFormatter('%.8f'))
-        ax.tick_params(axis='x', rotation=55)
+        ax.xaxis.set_major_formatter(ticker.FormatStrFormatter('%.3f'))
+        ax.tick_params(axis='x', rotation=45)
 
         mean_val = values.mean()
         std_val = values.std()
-        ax.axvline(mean_val, color='red', linestyle='--', linewidth=1, label=f'μ={mean_val:.8f}')
+        ax.axvline(mean_val, color='red', linestyle='--', linewidth=1, label=f'μ={mean_val:.4f}')
         ax.legend(fontsize=6, loc='upper right')
-        ax.text(0.95, 0.85, f'σ={std_val:.8f}', transform=ax.transAxes,
+        ax.text(0.95, 0.85, f'σ={std_val:.4f}', transform=ax.transAxes,
                 fontsize=6, ha='right', va='top')
 
     fig.suptitle("Gate Distribution per Dimension — Top Varying (across all tokens)", fontsize=11, y=1.02)
