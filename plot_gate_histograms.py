@@ -93,35 +93,36 @@ def plot_histograms_by_dimension(gate_weight, num_dims=5, num_bins=50, seed=42, 
     all_mins, all_maxs = [], []
     all_values = []
     for dim_idx in selected_dims:
-        v = torch.sigmoid(gate_weight[:, dim_idx].float()).numpy()
+        v = gate_weight[:, dim_idx].float().numpy()
         all_values.append(v)
         all_mins.append(v.min())
         all_maxs.append(v.max())
 
     global_min = min(all_mins)
     global_max = max(all_maxs)
-    padding = max((global_max - global_min) * 0.15, 0.005)
-    x_lo = max(0, global_min - padding)
-    x_hi = min(1, global_max + padding)
+    padding = max((global_max - global_min) * 0.15, 1e-5)
+    x_lo = global_min - padding
+    x_hi = global_max + padding
 
     for i, (dim_idx, values) in enumerate(zip(selected_dims, all_values)):
         ax = axes[i]
 
         ax.hist(values, bins=num_bins, range=(x_lo, x_hi), color='steelblue', edgecolor='white', linewidth=0.3)
         ax.set_title(f"Dim {dim_idx}")
-        ax.set_xlabel("Gate value (sigmoid)")
+        ax.set_xlabel("Raw gate value")
         if i == 0:
             ax.set_ylabel("Token count")
         ax.set_xlim(x_lo, x_hi)
+        ax.ticklabel_format(axis='x', useOffset=True)
 
         mean_val = values.mean()
         std_val = values.std()
-        ax.axvline(mean_val, color='red', linestyle='--', linewidth=1, label=f'μ={mean_val:.3f}')
+        ax.axvline(mean_val, color='red', linestyle='--', linewidth=1, label=f'μ={mean_val:.5f}')
         ax.legend(fontsize=7, loc='upper right')
-        ax.text(0.95, 0.85, f'σ={std_val:.4f}', transform=ax.transAxes,
+        ax.text(0.95, 0.85, f'σ={std_val:.6f}', transform=ax.transAxes,
                 fontsize=7, ha='right', va='top')
 
-    fig.suptitle("Gate Distribution per Dimension (across all tokens)", fontsize=11, y=1.02)
+    fig.suptitle("Raw Gate Distribution per Dimension (across all tokens)", fontsize=11, y=1.02)
     fig.tight_layout()
     fig.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"Figure saved to: {output_file}")
