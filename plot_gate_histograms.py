@@ -90,19 +90,17 @@ def plot_histograms_by_dimension(gate_weight, num_dims=5, num_bins=50, seed=42, 
     fig, axes = plt.subplots(1, num_dims, figsize=(3.2 * num_dims, 2.8), squeeze=False)
     axes = axes[0]
 
-    all_mins, all_maxs = [], []
     all_values = []
     for dim_idx in selected_dims:
         v = gate_weight[:, dim_idx].float().numpy()
         all_values.append(v)
-        all_mins.append(v.min())
-        all_maxs.append(v.max())
 
-    global_min = min(all_mins)
-    global_max = max(all_maxs)
-    padding = max((global_max - global_min) * 0.15, 1e-5)
-    x_lo = global_min - padding
-    x_hi = global_max + padding
+    all_concat = np.concatenate(all_values)
+    p_lo = np.percentile(all_concat, 0.5)
+    p_hi = np.percentile(all_concat, 99.5)
+    padding = max((p_hi - p_lo) * 0.15, 1e-6)
+    x_lo = p_lo - padding
+    x_hi = p_hi + padding
 
     for i, (dim_idx, values) in enumerate(zip(selected_dims, all_values)):
         ax = axes[i]
