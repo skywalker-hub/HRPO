@@ -483,9 +483,9 @@ class ThinkingResidualLambda(nn.Module):
                 - torch.log((self.Lambda ** (-1. / self.c) ) - 1)
             )
 
-    def forward(self, r_t):
+    def forward(self):
         a_t = torch.exp(
-            - self.c * nn.functional.softplus(-self.Lambda, beta=1, threshold=20) * r_t
+            - self.c * nn.functional.softplus(-self.Lambda, beta=1, threshold=20)
         )
         return a_t
 
@@ -515,9 +515,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
         self.rotary_emb = Qwen2RotaryEmbedding(config=config)
         self.gradient_checkpointing = False
 
-        ############## HRPO 核心模块定义处  
-        self.thinking_residual_gate_r = nn.Linear(config.hidden_size, config.hidden_size)
-        self.thinking_residual_gate_i = nn.Linear(config.hidden_size, config.hidden_size)
+        ############## HRPO 核心模块定义处
         self.thinking_residual_Lambda = ThinkingResidualLambda(config)
         
         # 新增：隐状态变换头，将原始隐状态投影到 thinking residual 空间
@@ -571,9 +569,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
         residual_normed = residual * torch.rsqrt(residual_variance + eps)
         h_residual = self.thinking_residual_head(residual_normed.to(residual.dtype))  # 连续信息向量
 
-        r_t = torch.sigmoid(self.thinking_residual_gate_r(h_residual))
-        i_t = torch.sigmoid(self.thinking_residual_gate_i(residual))  # 保留 i_t 定义，但不再使用
-        a_t = self.thinking_residual_Lambda(r_t)
+        a_t = self.thinking_residual_Lambda()
 
         # 新增：基于 token ID 的离散门控
         # g_k = sigmoid(lookup(k))，形状 (batch, seq_len, hidden_size)
