@@ -7,7 +7,7 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-import os
+import os 
 
 # ============ 配置区域 ============
 CHECKPOINT_PATH = "./main01.base/Qwen2.5-3B-Instruct-gsm8k-group4-lora32-lr0.01-init-2-rmin0.981-temp0.5/checkpoint-934"
