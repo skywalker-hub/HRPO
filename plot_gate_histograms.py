@@ -21,35 +21,18 @@ def generate_gate_data(num_tokens, num_dims, seed=42):
     rng = np.random.RandomState(seed)
 
     dims_data = []
-    dim_labels = []
+    dim_labels = [237, 814, 1025, 1576, 1903]
 
-    # Dim 237: 集中在 0.05 附近，窄分布 → gate 几乎没用
-    v = rng.normal(loc=0.05, scale=0.008, size=num_tokens).clip(0, 0.15)
-    dims_data.append(v)
-    dim_labels.append(237)
-
-    # Dim 814: 均匀散开 → gate 在不同 token 间差异大
-    v = rng.beta(2, 8, size=num_tokens) * 0.15
-    dims_data.append(v)
-    dim_labels.append(814)
-
-    # Dim 1025: 双峰分布 → 两类 token 的 gate 明显不同
-    mask = rng.rand(num_tokens) < 0.4
-    v = np.empty(num_tokens)
-    v[mask] = rng.normal(loc=0.03, scale=0.006, size=mask.sum()).clip(0, 0.15)
-    v[~mask] = rng.normal(loc=0.11, scale=0.008, size=(~mask).sum()).clip(0, 0.15)
-    dims_data.append(v)
-    dim_labels.append(1025)
-
-    # Dim 1576: 偏右，大部分 token gate 较高
-    v = rng.beta(5, 2, size=num_tokens) * 0.15
-    dims_data.append(v)
-    dim_labels.append(1576)
-
-    # Dim 1903: 极度集中在 0.12 附近，极窄 → 该维度几乎是常数
-    v = rng.normal(loc=0.12, scale=0.003, size=num_tokens).clip(0, 0.15)
-    dims_data.append(v)
-    dim_labels.append(1903)
+    configs = [
+        (0.07, 0.035),
+        (0.08, 0.030),
+        (0.06, 0.038),
+        (0.09, 0.032),
+        (0.065, 0.034),
+    ]
+    for loc, scale in configs:
+        v = rng.normal(loc=loc, scale=scale, size=num_tokens).clip(0, 0.15)
+        dims_data.append(v)
 
     return dims_data, dim_labels
 
