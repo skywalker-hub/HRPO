@@ -90,16 +90,29 @@ def plot_histograms_by_dimension(gate_weight, num_dims=5, num_bins=50, seed=42, 
     fig, axes = plt.subplots(1, num_dims, figsize=(3.2 * num_dims, 2.8), squeeze=False)
     axes = axes[0]
 
-    for i, dim_idx in enumerate(selected_dims):
-        ax = axes[i]
-        values = torch.sigmoid(gate_weight[:, dim_idx].float()).numpy()
+    all_mins, all_maxs = [], []
+    all_values = []
+    for dim_idx in selected_dims:
+        v = torch.sigmoid(gate_weight[:, dim_idx].float()).numpy()
+        all_values.append(v)
+        all_mins.append(v.min())
+        all_maxs.append(v.max())
 
-        ax.hist(values, bins=num_bins, range=(0, 1), color='steelblue', edgecolor='white', linewidth=0.3)
+    global_min = min(all_mins)
+    global_max = max(all_maxs)
+    padding = max((global_max - global_min) * 0.15, 0.005)
+    x_lo = max(0, global_min - padding)
+    x_hi = min(1, global_max + padding)
+
+    for i, (dim_idx, values) in enumerate(zip(selected_dims, all_values)):
+        ax = axes[i]
+
+        ax.hist(values, bins=num_bins, range=(x_lo, x_hi), color='steelblue', edgecolor='white', linewidth=0.3)
         ax.set_title(f"Dim {dim_idx}")
         ax.set_xlabel("Gate value (sigmoid)")
         if i == 0:
             ax.set_ylabel("Token count")
-        ax.set_xlim(0, 1)
+        ax.set_xlim(x_lo, x_hi)
 
         mean_val = values.mean()
         std_val = values.std()
