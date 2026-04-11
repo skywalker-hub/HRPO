@@ -95,12 +95,8 @@ def plot_histograms_by_dimension(gate_weight, num_dims=5, num_bins=50, seed=42, 
         v = gate_weight[:, dim_idx].float().numpy()
         all_values.append(v)
 
-    all_concat = np.concatenate(all_values)
-    p_lo = np.percentile(all_concat, 0.5)
-    p_hi = np.percentile(all_concat, 99.5)
-    padding = max((p_hi - p_lo) * 0.15, 1e-6)
-    x_lo = p_lo - padding
-    x_hi = p_hi + padding
+    x_lo = -2.0
+    x_hi = -1.99988
 
     for i, (dim_idx, values) in enumerate(zip(selected_dims, all_values)):
         ax = axes[i]
