@@ -108,7 +108,7 @@ def plot_histograms_by_dimension(gate_weight, num_dims=5, num_bins=50, seed=42, 
         if i == 0:
             ax.set_ylabel("Token count")
         ax.set_xlim(x_lo, x_hi)
-        ax.xaxis.set_major_formatter(ticker.FormatStrFormatter('%.5f'))
+        ax.xaxis.set_major_formatter(ticker.FormatStrFormatter('%.8f'))
         ax.set_xticks(np.linspace(x_lo, x_hi, 5))
         ax.tick_params(axis='x', rotation=45)
 
