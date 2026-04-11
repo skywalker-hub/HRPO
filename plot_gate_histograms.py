@@ -110,7 +110,11 @@ def plot_histograms_by_dimension(gate_weight, num_dims=5, num_bins=100, seed=42,
         pad = max((p_hi - p_lo) * 0.1, 1e-8)
         x_lo, x_hi = p_lo - pad, p_hi + pad
 
-        ax.hist(values, bins=num_bins, range=(x_lo, x_hi), color='steelblue', edgecolor='white', linewidth=0.3)
+        counts, bin_edges, patches = ax.hist(values, bins=num_bins, range=(x_lo, x_hi), color='steelblue', edgecolor='white', linewidth=0.3)
+        for count, patch in zip(counts, patches):
+            if count > 0:
+                ax.text(patch.get_x() + patch.get_width() / 2, count,
+                        f'{int(count)}', ha='center', va='bottom', fontsize=4)
         ax.set_title(f"Dim {dim_idx}")
         ax.set_xlabel("Raw gate value")
         if i == 0:
